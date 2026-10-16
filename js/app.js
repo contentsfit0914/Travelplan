@@ -419,7 +419,7 @@ function demoHotelList() {
 
 function setupStep3() {
   const t = S.trip;
-  const quick = QUICK_SPOTS.filter((q) => !t.mustSpots.some((m) => m.name === q));
+  const addedCount = QUICK_SPOTS.filter(quickAdded).length;
   const total = t.mustSpots.reduce((s, m) => s + m.stay, 0);
   const cap = t.days.reduce((s, _, i) => s + dayCapacity(t, i), 0);
   return `
@@ -429,7 +429,12 @@ function setupStep3() {
     <button class="btn btn-primary" data-action="search" data-target="must">검색</button>
   </div>
   ${resultsHTML('must')}
-  ${quick.length ? `<div class="chips-label">인기 스팟 빠르게 추가</div><div class="chips">${quick.map((q) => `<button class="chip" data-action="quick-spot" data-q="${esc(q)}">＋ ${esc(q)}</button>`).join('')}</div>` : ''}
+  <div class="chips-label">인기 스팟 빠르게 추가 <span class="muted">${addedCount ? `· ${addedCount}곳 추가됨 (다시 누르면 빠져요)` : '· 누르면 추가돼요'}</span></div>
+  <div class="chips">${QUICK_SPOTS.map((q) => {
+    const on = quickAdded(q);
+    const busy = S.ui.quickBusy === q;
+    return `<button class="chip quick ${on ? 'added' : ''}" data-action="quick-spot" data-q="${esc(q)}" aria-pressed="${on}" ${busy ? 'disabled' : ''}>${busy ? '<span class="spinner sm"></span>' : on ? '✓' : '＋'} ${esc(q)}</button>`;
+  }).join('')}</div>
   <div class="section-title">선택한 메인 스팟 <span class="muted">${t.mustSpots.length}곳 · 관광 ${fmtDur(total)} / 여행 중 가용 약 ${fmtDur(cap)}</span></div>
   ${
     t.mustSpots.length
@@ -1328,22 +1333,53 @@ async function doSearch(target) {
   render({ fit: true });
 }
 
-function addMust(p) {
-  if (S.trip.mustSpots.some((m) => m.id === p.id)) return;
+// 빠른 추가 칩: 검색 결과 이름이 칩 이름과 달라도 어떤 칩으로 추가했는지 기억한다
+const squash = (x) => String(x || '').replace(/\s+/g, '').toLowerCase();
+const matchesQuick = (m, q) => m.quick === q || (!m.quick && (squash(m.name).includes(squash(q)) || squash(q).includes(squash(m.name))));
+const quickAdded = (q) => S.trip.mustSpots.some((m) => matchesQuick(m, q));
+
+function addMust(p, quick) {
+  const exist = S.trip.mustSpots.find((m) => m.id === p.id);
+  if (exist) {
+    if (quick) exist.quick = quick;
+    save();
+    return;
+  }
   const kind = p.kind === 'hotel' ? 'sight' : p.kind;
-  S.trip.mustSpots.push(makeStop({ ...p, kind }, { must: true }));
+  S.trip.mustSpots.push(makeStop({ ...p, kind }, { must: true, ...(quick ? { quick } : {}) }));
   save();
 }
 
 async function quickSpot(q) {
+  if (S.ui.quickBusy) return;
+  if (quickAdded(q)) {
+    const i = S.trip.mustSpots.findIndex((m) => matchesQuick(m, q));
+    const [removed] = S.trip.mustSpots.splice(i, 1);
+    save();
+    render({ fit: true });
+    toast(`${removed.name} 뺐어요`, {
+      label: '되돌리기',
+      fn: () => {
+        S.trip.mustSpots.splice(i, 0, removed);
+        save();
+        render({ fit: true });
+      },
+    });
+    return;
+  }
+  S.ui.quickBusy = q;
+  render();
   try {
     const res = await S.provider.searchText(q, {});
-    if (!res.length) return toast(`'${q}'을(를) 찾지 못했어요.`);
-    addMust(res[0]);
-    toast(`${res[0].name} 추가`);
+    if (!res.length) toast(`'${q}'을(를) 찾지 못했어요.`);
+    else {
+      addMust(res[0], q);
+      toast(`${res[0].name} 추가`);
+    }
   } catch (e) {
     toast(`검색 실패: ${e.message || e}`);
   }
+  S.ui.quickBusy = null;
   render({ fit: true });
 }
 

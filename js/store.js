@@ -161,6 +161,7 @@ export function cleanPlace(p, { stop = false } = {}) {
       mode: STOP_MODES.includes(p.mode) ? p.mode : 'AUTO',
       meal: MEALS.includes(p.meal) ? p.meal : null,
       must: !!p.must,
+      quick: typeof p.quick === 'string' ? str(p.quick, 40) : undefined,
       fixed: p.fixed === 'arrival' ? 'arrival' : null,
     });
   }
