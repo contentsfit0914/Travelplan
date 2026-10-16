@@ -18,13 +18,18 @@ export const MODES = {
   DRIVE: { label: '택시', icon: '🚕', gmaps: 'driving' },
 };
 
-// 직선거리 × 도로 우회계수로 근사. 도쿄 시내 평균값 기준의 보수적 추정이다.
+// 직선거리 × 도로 우회계수로 근사. 도쿄 시내·공항 구간 평균값 기준의 보수적 추정이다.
+// 먼 구간(공항 등)은 고속도로·급행열차 비중이 커서 속도를 높여 잡는다.
 export function estimateMinutes(a, b, mode) {
   const km = distKm(a, b) * 1.3;
   if (mode === 'WALK') return Math.max(1, Math.round((km / 4.5) * 60));
-  if (mode === 'DRIVE') return Math.max(5, Math.round(4 + (km / 18) * 60));
-  // 대중교통: 역까지 도보 + 대기 + 환승을 고정 12분으로 가정
-  return Math.max(8, Math.round(12 + (km / 22) * 60));
+  if (mode === 'DRIVE') {
+    const t = km <= 15 ? (km / 18) * 60 : 50 + ((km - 15) / 60) * 60;
+    return Math.max(5, Math.round(4 + t));
+  }
+  // 대중교통: 역까지 도보 + 대기 + 환승을 고정 10분으로 가정
+  const t = km <= 25 ? (km / 28) * 60 : (25 / 28) * 60 + ((km - 25) / 70) * 60;
+  return Math.max(8, Math.round(10 + t));
 }
 
 // 이동수단 '자동'일 때: 도보 허용 거리 안이면 걷고, 아니면 기본 수단

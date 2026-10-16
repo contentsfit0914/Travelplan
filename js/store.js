@@ -16,13 +16,22 @@ export function defaultTrip() {
     baseMode: 'TRANSIT',
     walkLimitKm: 1,
     pace: 'normal',
-    arriveTime: '14:00',
-    departTime: '12:00',
-    dayStart: '09:30',
+    // 항공편: 도착(첫날)·출발(마지막 날). 일정 날짜는 여기서 계산한다(syncTrip)
+    arrival: { date: start, time: '11:00', airport: 'HND', mode: 'AUTO' },
+    departure: { date: addDays(start, 4), time: '18:00', airport: 'HND', mode: 'AUTO' },
+    immigrationMin: 0, // 입국 수속·수하물 여유
+    airportBufferMin: 120, // 출국 시 공항 도착 여유
+    checkIn: '15:00',
+    checkOut: '11:00',
+    restMin: 30, // 첫날 숙소 도착 후 짐 풀고 쉬는 시간
+    dayStart: '09:00',
     dayEnd: '21:00',
+    breakfastOn: false,
+    breakfast: '08:30',
     lunch: '12:00',
     dinner: '18:30',
     mealMinutes: 75,
+    mealTolerance: 30, // 식사시간 오차범위(분)
     hotel: null,
     mustSpots: [],
     days: [],
@@ -32,6 +41,30 @@ export function defaultTrip() {
 
 export function emptyDay() {
   return { stops: [], returnMode: 'AUTO', skipMeals: [] };
+}
+
+export const tripNights = (t) => Math.round((Date.parse(t.departure.date) - Date.parse(t.arrival.date)) / 864e5);
+
+// 항공편 날짜로 일정 길이를 맞추고, 첫날 '숙소 도착' 자리를 숙소 정보와 동기화한다
+export function syncTrip(trip) {
+  const n = tripNights(trip);
+  trip.startDate = trip.arrival.date;
+  trip.nights = Math.min(9, Math.max(1, Number.isFinite(n) ? n : 1));
+  ensureDays(trip);
+  trip.days.forEach((d, i) => {
+    if (i > 0) d.stops = d.stops.filter((s) => s.fixed !== 'arrival');
+  });
+  const d0 = trip.days[0];
+  const idx = d0.stops.findIndex((s) => s.fixed === 'arrival');
+  if (!trip.hotel) {
+    if (idx >= 0) d0.stops.splice(idx, 1);
+    return trip;
+  }
+  const h = trip.hotel;
+  const base = { id: 'arrival-hotel', name: h.name, lat: h.lat, lng: h.lng, address: h.address || '', kind: 'hotel', types: ['lodging'], fixed: 'arrival', stay: trip.restMin ?? 30 };
+  if (idx >= 0) Object.assign(d0.stops[idx], base);
+  else d0.stops.unshift({ ...base, uid: rid(), mode: 'AUTO', meal: null, must: false });
+  return trip;
 }
 
 export function ensureDays(trip) {
@@ -63,7 +96,8 @@ const write = (k, v) => {
 // 공유받은 JSON 파일은 외부 입력이다. 화면에 들어가는 모든 값을 형식·길이·허용 목록으로 다시 만든다.
 const KINDS = ['sight', 'food', 'cafe', 'hotel'];
 const STOP_MODES = ['AUTO', 'WALK', 'TRANSIT', 'DRIVE'];
-const MEALS = ['lunch', 'dinner'];
+const MEALS = ['breakfast', 'lunch', 'dinner'];
+const AIRPORT_CODES = ['HND', 'NRT'];
 const ID_RE = /^[A-Za-z0-9_:-]{1,200}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -127,6 +161,7 @@ export function cleanPlace(p, { stop = false } = {}) {
       mode: STOP_MODES.includes(p.mode) ? p.mode : 'AUTO',
       meal: MEALS.includes(p.meal) ? p.meal : null,
       must: !!p.must,
+      fixed: p.fixed === 'arrival' ? 'arrival' : null,
     });
   }
   return out;
@@ -136,19 +171,39 @@ export function sanitizeTrip(raw) {
   const d = defaultTrip();
   const t = raw && typeof raw === 'object' ? raw : {};
   const time = (k) => (TIME_RE.test(t[k]) ? t[k] : d[k]);
+  const pick = (k, list) => (list.includes(num(t[k], NaN)) ? num(t[k]) : d[k]);
+  const startDate = DATE_RE.test(t.startDate) && !Number.isNaN(Date.parse(t.startDate)) ? t.startDate : d.startDate;
+  // 이전 버전(출발일+박 수) 데이터는 같은 날짜의 항공편 기본값으로 옮긴다
+  const legacyNights = clamp(Math.trunc(num(t.nights, d.nights)), 1, 9);
+  const flight = (f, dflt) => ({
+    date: DATE_RE.test(f?.date) && !Number.isNaN(Date.parse(f.date)) ? f.date : dflt.date,
+    time: TIME_RE.test(f?.time) ? f.time : dflt.time,
+    airport: AIRPORT_CODES.includes(f?.airport) ? f.airport : dflt.airport,
+    mode: STOP_MODES.includes(f?.mode) ? f.mode : 'AUTO',
+  });
+  const arrival = flight(t.arrival, { ...d.arrival, date: startDate });
+  const departure = flight(t.departure, { ...d.departure, date: addDays(arrival.date, legacyNights) });
   const stops = (list) => (Array.isArray(list) ? list.slice(0, 60).map((x) => cleanPlace(x, { stop: true })).filter(Boolean) : []);
   const hotel = cleanPlace(t.hotel);
   const trip = {
     ...d,
     title: str(t.title, 60) || d.title,
-    startDate: DATE_RE.test(t.startDate) && !Number.isNaN(Date.parse(t.startDate)) ? t.startDate : d.startDate,
-    nights: clamp(Math.trunc(num(t.nights, d.nights)), 1, 7),
+    startDate: arrival.date,
+    nights: legacyNights,
+    arrival,
+    departure,
+    immigrationMin: pick('immigrationMin', [0, 30, 60, 90]),
+    airportBufferMin: pick('airportBufferMin', [90, 120, 150, 180]),
+    checkIn: time('checkIn'),
+    checkOut: time('checkOut'),
+    restMin: pick('restMin', [0, 15, 30, 60]),
+    breakfastOn: typeof t.breakfastOn === 'boolean' ? t.breakfastOn : d.breakfastOn,
+    breakfast: time('breakfast'),
+    mealTolerance: pick('mealTolerance', [10, 30, 60, 120]),
     people: clamp(Math.trunc(num(t.people, d.people)), 1, 20),
     baseMode: ['TRANSIT', 'DRIVE'].includes(t.baseMode) ? t.baseMode : d.baseMode,
     walkLimitKm: [0.5, 1, 1.5].includes(num(t.walkLimitKm)) ? num(t.walkLimitKm) : d.walkLimitKm,
     pace: ['relaxed', 'normal', 'packed'].includes(t.pace) ? t.pace : d.pace,
-    arriveTime: time('arriveTime'),
-    departTime: time('departTime'),
     dayStart: time('dayStart'),
     dayEnd: time('dayEnd'),
     lunch: time('lunch'),
@@ -157,7 +212,7 @@ export function sanitizeTrip(raw) {
     hotel: hotel ? { ...hotel, kind: 'hotel' } : null,
     mustSpots: stops(t.mustSpots),
     days: Array.isArray(t.days)
-      ? t.days.slice(0, 8).map((day) => ({
+      ? t.days.slice(0, 10).map((day) => ({
           stops: stops(day?.stops),
           returnMode: STOP_MODES.includes(day?.returnMode) ? day.returnMode : 'AUTO',
           skipMeals: Array.isArray(day?.skipMeals) ? day.skipMeals.filter((m) => MEALS.includes(m)) : [],
@@ -165,12 +220,12 @@ export function sanitizeTrip(raw) {
       : [],
     created: !!t.created,
   };
-  return ensureDays(trip);
+  return syncTrip(trip);
 }
 
 export function loadTrip() {
   const t = read(TRIP_KEY);
-  if (!t || t.v !== 1) return ensureDays(defaultTrip());
+  if (!t || t.v !== 1) return syncTrip(defaultTrip());
   return sanitizeTrip(t);
 }
 export const saveTrip = (t) => write(TRIP_KEY, t);

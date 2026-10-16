@@ -13,11 +13,19 @@ import {
   bestInsert,
   timedInsert,
   estimator,
+  estimateSeg,
   fmtTime,
   fmtDur,
   toMin,
   PACE,
   MEAL_LABEL,
+  MEAL_TYPES,
+  AIRPORTS,
+  airportPoint,
+  dayOrigin,
+  minInsertIndex,
+  budgetRadius,
+  budgetLabel,
 } from './planner.js';
 import { MODES, distKm, fmtKm, centroid } from './geo.js';
 import {
@@ -26,6 +34,8 @@ import {
   loadSettings,
   saveSettings,
   ensureDays,
+  syncTrip,
+  tripNights,
   emptyDay,
   defaultTrip,
   validateImported,
@@ -56,7 +66,8 @@ const ICON = {
   close: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',
   expand: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>',
 };
-const STEP_TITLES = ['', '여행 정보', '숙소 위치', '가고 싶은 메인 스팟', '하루 시간 설정'];
+const STEP_TITLES = ['', '항공편·기본 정보', '숙소', '가고 싶은 메인 스팟', '하루 시간·식사'];
+const STEP_SHORT = ['', '항공·기본', '숙소', '메인 스팟', '시간·식사'];
 
 const S = {
   trip: loadTrip(),
@@ -93,7 +104,14 @@ const color = (di) => DAY_COLORS[di % DAY_COLORS.length];
 const allStops = () => S.trip.days.flatMap((d, di) => d.stops.map((s, i) => ({ s, di, i })));
 const findStop = (u) => allStops().find((x) => x.s.uid === u);
 const placeDay = (id) => allStops().find((x) => x.s.id === id)?.di;
-const save = () => saveTrip(S.trip);
+const save = () => saveTrip(syncTrip(S.trip));
+const getPath = (o, path) => path.split('.').reduce((v, k) => v?.[k], o);
+function setPath(o, path, v) {
+  const keys = path.split('.');
+  const last = keys.pop();
+  keys.reduce((x, k) => x[k], o)[last] = v;
+}
+const NUM_FIELDS = ['walkLimitKm', 'mealMinutes', 'immigrationMin', 'airportBufferMin', 'restMin', 'mealTolerance', 'nights'];
 const photoOf = (p) => safeUrl(p.photo, { image: true });
 const cssColor = (c) => (/^#[0-9a-f]{3,8}$/i.test(c || '') ? c : null);
 const candDomId = (id) => `cand-${String(id).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
@@ -254,27 +272,31 @@ function setupHTML() {
   const t = S.trip;
   const step = S.ui.step;
   const body = [null, setupStep1, setupStep2, setupStep3, setupStep4][step]();
-  const canNext = step !== 2 || t.hotel;
+  const datesOk = tripNights(t) >= 1;
+  const canNext = (step !== 1 || datesOk) && (step !== 2 || t.hotel);
+  const nextLabel = step === 1 && !datesOk ? '출발 날짜를 확인해 주세요' : step === 2 && !t.hotel ? '숙소를 선택해 주세요' : '다음';
   return `
   <div class="sticky-head">
   <header class="topbar">
     <div>
-      <div class="eyebrow">여행 준비 ${step}/4</div>
+      <div class="eyebrow">${t.created ? '여행 설정 수정' : '여행 준비'} ${step}/4</div>
       <h1>${STEP_TITLES[step]}</h1>
     </div>
-    ${t.created ? `<button class="btn-ghost" data-action="close-setup">닫기</button>` : `<button class="icon-btn" data-action="open-settings" aria-label="설정">${ICON.gear}</button>`}
+    ${t.created ? `<button class="btn btn-sm btn-primary" data-action="save-setup" ${datesOk ? '' : 'disabled'}>저장하고 일정 보기</button>` : `<button class="icon-btn" data-action="open-settings" aria-label="설정">${ICON.gear}</button>`}
   </header>
-  <div class="steps">${[1, 2, 3, 4].map((n) => `<button class="step-dot ${n <= step ? 'on' : ''}" data-action="goto-step" data-step="${n}" aria-label="${STEP_TITLES[n]}"></button>`).join('')}</div>
+  <nav class="stepnav" aria-label="설정 단계">${[1, 2, 3, 4]
+    .map((n) => `<button class="${n === step ? 'on' : n < step ? 'done' : ''}" data-action="goto-step" data-step="${n}" ${n === step ? 'aria-current="step"' : ''}><i>${n}</i>${STEP_SHORT[n]}</button>`)
+    .join('')}</nav>
   </div>
   <section class="content">${body}</section>
   <footer class="action-bar">
     ${step > 1 ? `<button class="btn" data-action="goto-step" data-step="${step - 1}">이전</button>` : '<span></span>'}
     ${
       step < 4
-        ? `<button class="btn btn-primary" data-action="goto-step" data-step="${step + 1}" ${canNext ? '' : 'disabled'}>${step === 2 && !t.hotel ? '숙소를 선택해 주세요' : '다음'}</button>`
+        ? `<button class="btn btn-primary" data-action="goto-step" data-step="${step + 1}" ${canNext ? '' : 'disabled'}>${nextLabel}</button>`
         : t.created
-          ? `<button class="btn btn-primary" data-action="save-setup">변경 사항 저장</button>`
-          : `<button class="btn btn-primary" data-action="build" ${t.hotel ? '' : 'disabled'}>일정 자동 만들기 ✨</button>`
+          ? `<button class="btn btn-primary" data-action="save-setup" ${datesOk ? '' : 'disabled'}>변경 사항 저장</button>`
+          : `<button class="btn btn-primary" data-action="build" ${t.hotel && datesOk ? '' : 'disabled'}>일정 자동 만들기 ✨</button>`
     }
   </footer>`;
 }
@@ -285,23 +307,41 @@ function seg3(field, options, current) {
     .join('')}</div>`;
 }
 
+const AIRPORT_OPTIONS = Object.values(AIRPORTS).map((a) => [a.code, a.name.replace(' 공항', '')]);
+
+function flightCard(kind) {
+  const t = S.trip;
+  const f = t[kind];
+  const arr = kind === 'arrival';
+  return `<div class="card flight-card">
+    <div class="fc-head">${arr ? '🛬 도쿄 도착' : '🛫 도쿄 출발'}</div>
+    <div class="row2">
+      <div class="field"><label for="${kind}-date">${arr ? '도착 날짜' : '출발 날짜'}</label><input id="${kind}-date" type="date" data-field="${kind}.date" value="${f.date}"></div>
+      <div class="field"><label for="${kind}-time">${arr ? '도착 시간' : '출발 시간'}</label><input id="${kind}-time" type="time" data-field="${kind}.time" value="${f.time}" step="300"></div>
+    </div>
+    <div class="field"><label>${arr ? '도착 공항' : '출발 공항'}</label>${seg3(`${kind}.airport`, AIRPORT_OPTIONS, f.airport)}</div>
+    ${
+      arr
+        ? `<div class="field"><label>입국 수속·짐 찾기 여유</label>${seg3('immigrationMin', [[0, '없음'], [30, '30분'], [60, '1시간'], [90, '1시간 30분']], t.immigrationMin)}
+           <p class="hint">비행기 착륙 시간을 넣었다면 1시간을 권장해요. 공항을 나서는 시간을 넣었다면 '없음'.</p></div>`
+        : `<div class="field"><label>공항 도착 여유 (이륙 전)</label>${seg3('airportBufferMin', [[90, '1시간 30분'], [120, '2시간'], [150, '2시간 30분'], [180, '3시간']], t.airportBufferMin)}</div>`
+    }
+  </div>`;
+}
+
 function setupStep1() {
   const t = S.trip;
-  const end = dayDate({ ...t, days: [] }, t.nights);
+  const n = tripNights(t);
   return `
   ${providerBanner()}
-  <div class="field">
-    <label>출발일</label>
-    <input type="date" data-field="startDate" value="${t.startDate}">
-    <p class="hint">${dayLabel(t, 0)} 출발 → ${Number(end.slice(5, 7))}/${Number(end.slice(8, 10))} 귀국 · 요일별 영업시간 확인에 쓰여요</p>
-  </div>
+  ${flightCard('arrival')}
+  ${flightCard('departure')}
+  ${
+    n >= 1
+      ? `<div class="trip-sum">🗓 <b>${t.nights}박 ${t.nights + 1}일</b> · ${dayLabel(t, 0)} ${t.arrival.time} 도착 → ${dayLabel(t, t.nights)} ${t.departure.time} 출발${n > 9 ? ' <span class="muted">(최대 9박까지 계획해요)</span>' : ''}</div>`
+      : `<div class="banner banner-err">출발 날짜가 도착 날짜보다 뒤여야 해요.</div>`
+  }
   <div class="row2">
-    <div class="field">
-      <label>일정</label>
-      <select data-field="nights" data-type="num">${[1, 2, 3, 4, 5, 6, 7]
-        .map((n) => `<option value="${n}" ${n === t.nights ? 'selected' : ''}>${n}박 ${n + 1}일</option>`)
-        .join('')}</select>
-    </div>
     <div class="field">
       <label>인원</label>
       <div class="stepper">
@@ -310,15 +350,15 @@ function setupStep1() {
         <button data-action="people" data-d="1" aria-label="인원 늘리기">＋</button>
       </div>
     </div>
+    <div class="field">
+      <label>도보 최대 거리</label>
+      ${seg3('walkLimitKm', [[0.5, '500m'], [1, '1km'], [1.5, '1.5km']], t.walkLimitKm)}
+    </div>
   </div>
   <div class="field">
     <label>기본 이동수단</label>
     ${seg3('baseMode', [['TRANSIT', '🚇 대중교통 위주'], ['DRIVE', '🚕 택시 위주']], t.baseMode)}
-    <p class="hint">가까운 거리는 아래 기준에 따라 자동으로 도보로 계산해요. 구간마다 따로 바꿀 수도 있어요.</p>
-  </div>
-  <div class="field">
-    <label>도보로 이동할 최대 거리</label>
-    ${seg3('walkLimitKm', [[0.5, '500m'], [1, '1km'], [1.5, '1.5km']], t.walkLimitKm)}
+    <p class="hint">도보 최대 거리 안은 자동으로 걸어서 계산해요. 공항 이동을 포함해 구간마다 따로 바꿀 수 있어요.</p>
   </div>
   <div class="field">
     <label>여행 페이스</label>
@@ -353,8 +393,18 @@ function setupStep2() {
   ${
     h
       ? `<div class="card hotel-card"><div class="pin-inline">🏨</div><div><b>${esc(h.name)}</b><div class="muted">${esc(h.address)}</div></div></div>`
-      : `<p class="lead">숙소를 기준으로 매일 출발·복귀 동선을 계산해요.</p>`
+      : `<p class="lead">숙소를 기준으로 공항 이동과 매일 출발·복귀 동선을 계산해요.</p>`
   }
+  <div class="row2">
+    ${timeField('체크인', 'checkIn')}
+    ${timeField('체크아웃', 'checkOut')}
+  </div>
+  <div class="field">
+    <label>첫날 숙소 도착 후 쉬는 시간</label>
+    ${seg3('restMin', [[0, '바로 출발'], [15, '15분'], [30, '30분'], [60, '1시간']], S.trip.restMin)}
+    <p class="hint">공항→숙소 이동시간은 자동으로 계산해요. 체크인 전에 도착하면 짐을 맡기고 쉬는 시간으로 잡아요.</p>
+  </div>
+  <div class="section-title">숙소 검색</div>
   <div class="searchbox">
     <input type="search" placeholder="${isDemo() ? '지역 검색 (예: 신주쿠, 시부야, 긴자)' : '호텔 이름이나 주소 검색'}" data-search="hotel" value="${esc(S.ui.search.q)}" enterkeyhint="search">
     <button class="btn btn-primary" data-action="search" data-target="hotel">검색</button>
@@ -401,8 +451,9 @@ function setupStep3() {
   }`;
 }
 
-function timeField(label, field, hint = '') {
-  return `<div class="field"><label>${label}</label><input type="time" data-field="${field}" value="${S.trip[field]}" step="900">${hint ? `<p class="hint">${hint}</p>` : ''}</div>`;
+function timeField(label, field, hint = '', disabled = false) {
+  const id = `f-${field.replace('.', '-')}`;
+  return `<div class="field"><label for="${id}">${label}</label><input id="${id}" type="time" data-field="${field}" value="${getPath(S.trip, field)}" step="300" ${disabled ? 'disabled' : ''}>${hint ? `<p class="hint">${hint}</p>` : ''}</div>`;
 }
 
 function setupStep4() {
@@ -411,28 +462,36 @@ function setupStep4() {
     .map((_, i) => {
       const w = dayWindow(t, i);
       const cap = dayCapacity(t, i);
-      return `<div class="cap-row"><span class="cap-day" style="--c:${color(i)}">D${i + 1}</span><span class="cap-date">${dayLabel(t, i)}</span><span class="cap-bar"><i style="width:${Math.min(100, (cap / 720) * 100)}%;background:${color(i)}"></i></span><span class="cap-txt">${fmtTime(w.start)}–${fmtTime(w.end)}</span></div>`;
+      const label = i === 0 ? `✈ ${fmtTime(w.start)}–${fmtTime(w.end)}` : w.isDeparture && w.dep ? `${fmtTime(w.start)}–${fmtTime(w.rawEnd)} ✈` : `${fmtTime(w.start)}–${fmtTime(w.end)}`;
+      return `<div class="cap-row"><span class="cap-day" style="--c:${color(i)}">D${i + 1}</span><span class="cap-date">${dayLabel(t, i)}</span><span class="cap-bar"><i style="width:${Math.min(100, (cap / 720) * 100)}%;background:${color(i)}"></i></span><span class="cap-txt">${label}</span></div>`;
     })
     .join('');
   return `
   <div class="row2">
-    ${timeField('첫날 일정 시작', 'arriveTime', '숙소 도착·짐 정리 후')}
-    ${timeField('마지막 날 숙소 복귀', 'departTime', '체크아웃·공항 이동 전')}
+    ${timeField('일정 시작', 'dayStart', '매일 숙소에서 출발')}
+    ${timeField('일정 마무리', 'dayEnd', '숙소 복귀 목표')}
   </div>
-  <div class="row2">
-    ${timeField('매일 숙소 출발', 'dayStart')}
-    ${timeField('매일 숙소 복귀', 'dayEnd')}
-  </div>
-  <div class="row2">
-    ${timeField('점심 시간', 'lunch')}
-    ${timeField('저녁 시간', 'dinner')}
+  <div class="section-title">식사 시간</div>
+  <div class="card meal-card">
+    <div class="meal-row">
+      ${timeField('아침', 'breakfast', '', !t.breakfastOn)}
+      <label class="check"><input type="checkbox" data-field="breakfastOn" data-type="bool-inv" ${t.breakfastOn ? '' : 'checked'}> 아침 건너뛰기</label>
+    </div>
+    <div class="row2">
+      ${timeField('점심', 'lunch')}
+      ${timeField('저녁', 'dinner')}
+    </div>
   </div>
   <div class="field">
     <label>식사 1회 소요 (${t.people}명 기준)</label>
     ${seg3('mealMinutes', [[60, '60분'], [75, '75분'], [90, '90분'], [120, '120분']], t.mealMinutes)}
-    <p class="hint">식사 시간대가 비어 있으면 일정표에 '맛집 추천' 자리를 만들어 드려요.</p>
   </div>
-  <div class="section-title">날짜별 관광 가용 시간 <span class="muted">(식사 제외)</span></div>
+  <div class="field">
+    <label>식사시간 오차범위</label>
+    ${seg3('mealTolerance', [[10, '10분'], [30, '30분'], [60, '1시간'], [120, '2시간']], t.mealTolerance)}
+    <p class="hint">목표 시각에 가장 가까운 빈 시간에 식사 자리를 잡아요. 오차범위 안에서 남는 시간만큼 더 먼 맛집까지 추천해요. 예) 점심 12:00·오차 1시간인데 12:30에 자리가 나면 30분 안에 갈 수 있는 곳까지 찾아요.</p>
+  </div>
+  <div class="section-title">날짜별 관광 가용 시간 <span class="muted">(공항 이동·식사 제외)</span></div>
   <div class="cap-list">${bars}</div>`;
 }
 
@@ -456,6 +515,7 @@ function planHTML() {
       <h1>도쿄 ${t.nights}박 ${t.nights + 1}일</h1>
     </div>
     <div class="top-actions">
+      <button class="btn btn-sm" data-action="edit-setup" data-step="1" aria-label="여행 설정 수정">✎ 설정 수정</button>
       <button class="icon-btn" data-action="share" aria-label="일정 공유">${ICON.share}</button>
       <button class="icon-btn" data-action="open-settings" aria-label="설정">${ICON.gear}</button>
     </div>
@@ -486,8 +546,8 @@ function overviewHTML() {
         const r = computeDay(t, i, s);
         const warn = r.overflow ? `<span class="warn-pill">⚠ ${fmtDur(r.overflow)} 초과</span>` : r.gaps.length ? `<span class="gap-pill">🍽 ${r.gaps.map((g) => g.label).join('·')} 미정</span>` : `<span class="ok-pill">여유 ${fmtDur(r.free)}</span>`;
         return `<button class="day-card" style="--c:${color(i)}" data-action="day" data-day="${i}">
-          <div class="dc-head"><b>D${i + 1}</b> <span>${dayLabel(t, i)}</span> <span class="muted">${fmtTime(r.win.start)}–${fmtTime(Math.max(r.end, r.win.start))}</span> ${warn}</div>
-          <div class="dc-stops">${d.stops.length ? d.stops.map((st, k) => `<span><i>${k + 1}</i>${esc(st.name)}</span>`).join('') : '<span class="muted">비어 있음 — 눌러서 채우기</span>'}</div>
+          <div class="dc-head"><b>D${i + 1}</b> <span>${dayLabel(t, i)}</span> <span class="muted">${i === 0 ? `✈ ${t.arrival.time} 도착` : r.dep ? `✈ ${t.departure.time} 출발` : `${fmtTime(r.win.start)}–${fmtTime(Math.max(r.end, r.win.start))}`}</span> ${warn}</div>
+          <div class="dc-stops">${r.rows.some((x) => x.num) ? r.rows.filter((x) => x.num).map((x) => `<span><i>${x.num}</i>${esc(x.stop.name)}</span>`).join('') : '<span class="muted">비어 있음 — 눌러서 채우기</span>'}</div>
           <div class="dc-foot muted">이동 ${fmtDur(r.totals.travel)} · 관광 ${fmtDur(r.totals.sight)} · 식사·카페 ${fmtDur(r.totals.meal)}</div>
         </button>`;
       })
@@ -514,23 +574,35 @@ function legHTML(leg, from, to, ref, pref, di) {
   </div>`;
 }
 
+function anchorName(a) {
+  if (!a) return '현재 위치';
+  if (a === S.trip.hotel || a.fixed === 'arrival') return '숙소';
+  return a.name;
+}
+
 function gapHTML(g) {
-  const anchorName = g.anchor ? (g.anchor === S.trip.hotel ? '숙소' : g.anchor.name) : '현재 위치';
+  const diff = g.dev === 0 ? '목표 시각 그대로' : `목표 ${fmtTime(g.time)}보다 ${fmtDur(Math.abs(g.dev))} ${g.dev > 0 ? '늦게' : '일찍'}`;
+  const status = g.ok ? `<em class="ok-txt">오차범위 ${fmtDur(g.tol)} 안</em>` : `<em class="warn-txt">오차범위 ${fmtDur(g.tol)} 밖</em>`;
   return `<div class="gap">
-    <div class="stop-time"><b>${fmtTime(g.time)}</b><small>${g.label}</small></div>
+    <div class="stop-time"><b>${fmtTime(g.at)}</b><small>${g.label}</small></div>
     <div class="gap-ico">🍽</div>
     <div class="gap-card">
       <button class="gap-main" data-action="open-rec" data-tab="food" data-gap="${g.type}">
         <b>${g.label} 식당이 비어 있어요</b>
-        <small>${esc(anchorName)} 주변 맛집 추천받기 ›</small>
+        <span class="gap-meta">${diff} · ${status}</span>
+        <small>${esc(anchorName(g.anchor))}에서 ${budgetLabel(g.budget)} 맛집 찾기 ›</small>
       </button>
       <button class="gap-skip" data-action="skip-meal" data-meal="${g.type}">건너뛰기</button>
     </div>
   </div>`;
 }
 
+function anchorHTML(time, icon, text, sub = '', cls = '') {
+  return `<div class="anchor ${cls}"><span class="a-time">${fmtTime(time)}</span><span class="a-ico">${icon}</span><span>${text}${sub ? `<small class="muted"> · ${sub}</small>` : ''}</span></div>`;
+}
+
 function freeHTML(from, to, anchor) {
-  const a = anchor && anchor !== S.trip.hotel && anchor.uid ? anchor.uid : 'hotel';
+  const a = anchor?.uid && !anchor.fixed ? anchor.uid : anchor?.kind === 'airport' ? 'origin' : 'hotel';
   return `<div class="free">
     <span class="free-line"></span>
     <button data-action="open-rec" data-tab="sight" data-anchor="${a}">
@@ -543,18 +615,21 @@ function freeHTML(from, to, anchor) {
 function stopHTML(row, di) {
   const s = row.stop;
   const active = S.ui.focus === s.uid ? 'is-active' : '';
-  return `<div class="stop ${active}" style="--c:${color(di)}" data-uid="${esc(s.uid)}">
+  const name = s.fixed === 'arrival' ? '숙소 도착 · 짐 풀고 쉬기' : esc(s.name);
+  const meta = s.fixed === 'arrival' ? esc(s.name) : `${s.must ? '<em class="badge">메인</em>' : ''}${s.meal ? `<em class="badge meal">${MEAL_LABEL[s.meal]}</em>` : ''}${ratingHTML(s)} ${placeMeta(s)}`;
+  return `<div class="stop ${active} ${s.fixed ? 'is-fixed' : ''}" style="--c:${color(di)}" data-uid="${esc(s.uid)}">
     <div class="stop-time"><b>${fmtTime(row.arrive)}</b><small>~${fmtTime(row.depart)}</small></div>
-    <div class="stop-num">${row.index + 1}</div>
+    <div class="stop-num">${row.num ?? '🏨'}</div>
     <button class="stop-body" data-action="open-stop" data-uid="${esc(s.uid)}">
-      <span class="stop-name">${KIND[s.kind]?.icon || '📍'} ${esc(s.name)}</span>
-      <span class="stop-meta">${s.must ? '<em class="badge">메인</em>' : ''}${s.meal ? `<em class="badge meal">${MEAL_LABEL[s.meal]}</em>` : ''}${ratingHTML(s)} ${placeMeta(s)}</span>
+      <span class="stop-name">${s.fixed ? '' : `${KIND[s.kind]?.icon || '📍'} `}${name}</span>
+      <span class="stop-meta">${meta}</span>
+      ${row.info ? `<span class="info">${esc(row.info)}</span>` : ''}
       ${row.warn ? `<span class="warn">⚠ ${esc(row.warn)}</span>` : ''}
     </button>
     <div class="stay">
-      <button data-action="stay" data-uid="${esc(s.uid)}" data-d="-15" aria-label="체류시간 줄이기">−</button>
+      <button data-action="stay" data-uid="${esc(s.uid)}" data-d="-15" aria-label="머무는 시간 줄이기">−</button>
       <span>${fmtDur(s.stay)}</span>
-      <button data-action="stay" data-uid="${esc(s.uid)}" data-d="15" aria-label="체류시간 늘리기">＋</button>
+      <button data-action="stay" data-uid="${esc(s.uid)}" data-d="15" aria-label="머무는 시간 늘리기">＋</button>
     </div>
   </div>`;
 }
@@ -565,20 +640,25 @@ function dayHTML(di) {
   const r = computeDay(t, di, seg());
   const span = Math.max(1, r.win.end - r.win.start, r.end - r.win.start);
   const pct = (m) => `${Math.max(0, (m / span) * 100)}%`;
-  const sights = day.stops.filter((s) => s.kind === 'sight').length;
-  const foods = day.stops.filter((s) => s.kind !== 'sight').length;
+  const real = day.stops.filter((s) => !s.fixed);
+  const sights = real.filter((s) => s.kind === 'sight').length;
+  const foods = real.filter((s) => s.kind !== 'sight').length;
   const pending = r.rows.some((x) => x.leg?.pending) || r.back?.pending;
   const routeUrl = dayRouteUrl(di);
 
   // 타임라인 조립
   const parts = [];
-  if (t.hotel) parts.push(`<div class="anchor"><span class="a-time">${fmtTime(r.win.start)}</span><span class="a-ico">🏨</span><span>${esc(t.hotel.name)} 출발</span></div>`);
-  let prev = t.hotel;
+  if (r.win.isArrival && t.arrival) {
+    parts.push(anchorHTML(r.win.start, '🛬', `${esc(r.origin.name)} 출발`, `${t.arrival.time} 도착${t.immigrationMin ? ` + 입국 수속 ${fmtDur(t.immigrationMin)}` : ''}`));
+  } else if (t.hotel && (r.rows.length || !r.dep)) {
+    parts.push(anchorHTML(r.win.start, '🏨', `${esc(t.hotel.name)} 출발`, r.dep ? `체크아웃 ${t.checkOut} · 짐은 숙소에 맡겨 두세요` : ''));
+  }
+  let prev = r.origin;
   let free = r.win.start;
   const gapWithFree = (g) => {
-    if (g.time - free >= 60) parts.push(freeHTML(free, g.time, g.anchor));
+    if (g.at - free >= 60) parts.push(freeHTML(free, g.at, g.anchor));
     parts.push(gapHTML(g));
-    free = Math.max(free, g.time + t.mealMinutes);
+    free = Math.max(free, g.at + t.mealMinutes);
   };
   r.rows.forEach((row, i) => {
     r.gaps.filter((g) => g.index === i).forEach(gapWithFree);
@@ -590,17 +670,23 @@ function dayHTML(di) {
   const tailGaps = r.gaps.filter((g) => g.index >= r.rows.length);
   tailGaps.forEach(gapWithFree);
   const openTail = tailGaps.length > 0 || (r.rows.length && r.free >= 90);
-  if (r.rows.length && r.free >= 90) parts.push(freeHTML(free, r.win.end - (r.back?.min || 0), prev));
+  if (r.rows.length && r.free >= 90) parts.push(freeHTML(free, r.win.rawEnd - (r.back?.min || 0), prev));
   if (r.back) parts.push(legHTML(r.back, prev, t.hotel, `back:${di}`, day.returnMode, di));
-  if (t.hotel && r.rows.length)
+  const backLabel = r.dep ? '숙소 복귀 · 짐 찾기' : '숙소 복귀';
+  if (t.hotel && r.back)
     parts.push(
       openTail
-        ? `<div class="anchor end"><span class="a-time">${fmtTime(r.win.end)}</span><span class="a-ico">🏨</span><span>숙소 복귀 목표<small class="muted"> · 지금 일정대로면 ${fmtTime(r.end)} 복귀</small></span></div>`
-        : `<div class="anchor end ${r.overflow ? 'over' : ''}"><span class="a-time">${fmtTime(r.end)}</span><span class="a-ico">🏨</span><span>숙소 복귀${r.overflow ? ` · 목표 ${fmtTime(r.win.end)}보다 ${fmtDur(r.overflow)} 늦어요` : ''}</span></div>`,
+        ? anchorHTML(r.win.rawEnd, '🏨', `${backLabel} 목표`, `지금 일정대로면 ${fmtTime(r.end)} 복귀`, 'end')
+        : anchorHTML(r.end, '🏨', backLabel, r.overflow ? `${r.dep ? '공항 출발' : '목표'} ${fmtTime(r.win.rawEnd)}보다 ${fmtDur(r.overflow)} 늦어요` : '', `end ${r.overflow ? 'over' : ''}`),
     );
+  if (r.dep) {
+    parts.push(anchorHTML(r.dep.leaveBy, '🧳', '공항으로 출발', '늦어도 이 시각에는 숙소를 나서야 해요', 'end'));
+    parts.push(legHTML(r.dep.leg, t.hotel, r.dep.airport, 'airout', t.departure.mode, di));
+    parts.push(anchorHTML(r.dep.atAirport, '🛫', `${esc(r.dep.airport.name)} 도착`, `이륙 ${t.departure.time} · ${fmtDur(t.airportBufferMin)} 전`, 'end'));
+  }
 
   const flow = [
-    { n: 1, label: '이동 동선', done: day.stops.length > 0, sub: day.stops.length ? `${day.stops.length}곳` : '비어 있음', action: '' },
+    { n: 1, label: '이동 동선', done: real.length > 0, sub: real.length ? `${real.length}곳` : '비어 있음', action: '' },
     { n: 2, label: '가볼만한 곳', done: sights >= 2, sub: `관광 ${sights}곳`, action: 'data-action="open-rec" data-tab="sight"' },
     {
       n: 3,
@@ -615,7 +701,7 @@ function dayHTML(di) {
     <div class="summary" style="--c:${color(di)}">
       <div class="sum-head">
         <div><b>D${di + 1} · ${dayLabel(t, di)}</b>${r.win.isArrival ? '<em class="badge">도착일</em>' : ''}${r.win.isDeparture ? '<em class="badge">귀국일</em>' : ''}</div>
-        <div class="muted">${fmtTime(r.win.start)} – ${fmtTime(r.win.end)}</div>
+        <div class="muted">${r.win.isArrival ? '✈ ' : ''}${fmtTime(r.win.start)} – ${fmtTime(r.win.rawEnd)}${r.dep ? ' ✈' : ''}</div>
       </div>
       <div class="timebar" aria-hidden="true">
         <i class="tb-travel" style="width:${pct(r.totals.travel)}"></i><i class="tb-sight" style="width:${pct(r.totals.sight)}"></i><i class="tb-meal" style="width:${pct(r.totals.meal)}"></i>${r.overflow ? `<i class="tb-over" style="width:${pct(r.overflow)}"></i>` : ''}
@@ -625,10 +711,10 @@ function dayHTML(di) {
         <span><i class="lg lg-travel"></i>이동 ${fmtDur(r.totals.travel)}</span>
         <span><i class="lg lg-sight"></i>관광 ${fmtDur(r.totals.sight)}</span>
         <span><i class="lg lg-meal"></i>식사·카페 ${fmtDur(r.totals.meal)}</span>
-        ${r.overflow ? `<span class="over">⚠ ${fmtDur(r.overflow)} 초과</span>` : `<span class="ok">여유 ${fmtDur(r.free)}</span>`}
+        ${r.overflow ? `<span class="over">⚠ ${fmtDur(r.overflow)} 초과${r.dep ? ' · 비행기 시간 확인' : ''}</span>` : `<span class="ok">여유 ${fmtDur(r.free)}</span>`}
       </div>
       <div class="sum-actions">
-        <button class="btn btn-sm" data-action="optimize" ${day.stops.length < 2 ? 'disabled' : ''}>⇅ 동선 최적화</button>
+        <button class="btn btn-sm" data-action="optimize" ${real.length < 2 ? 'disabled' : ''}>⇅ 동선 최적화</button>
         ${routeUrl ? `<a class="btn btn-sm" href="${routeUrl}" target="_blank" rel="noopener">🗺 Google 지도로 보기</a>` : ''}
         ${pending ? '<span class="muted small"><span class="spinner sm"></span> 실제 경로 계산 중</span>' : ''}
       </div>
@@ -639,7 +725,7 @@ function dayHTML(di) {
     ${!t.hotel ? `<div class="banner banner-err">숙소가 없어 출발·복귀 동선을 계산할 수 없어요. <button class="link" data-action="edit-setup" data-step="2">숙소 설정</button></div>` : ''}
     <div class="timeline">${parts.join('')}</div>
     ${
-      !day.stops.length
+      !real.length
         ? `<div class="empty big"><p>아직 이 날 일정이 비어 있어요.</p><button class="btn btn-primary" data-action="open-rec" data-tab="sight">숙소 주변 가볼만한 곳 추천받기</button></div>`
         : ''
     }
@@ -670,8 +756,10 @@ function anchorOptions(sh) {
   const t = S.trip;
   const day = t.days[S.ui.day];
   const opts = [['route', '동선 전체']];
+  if (S.ui.day === 0 && t.arrival) opts.push(['origin', `✈ ${AIRPORTS[t.arrival.airport].name}`]);
   if (t.hotel) opts.push(['hotel', '🏨 숙소']);
-  day.stops.forEach((s, i) => opts.push([s.uid, `${i + 1}. ${s.name}`]));
+  let n = 0;
+  day.stops.forEach((s) => !s.fixed && opts.push([s.uid, `${++n}. ${s.name}`]));
   return `<div class="chips scroll">${opts
     .map(([v, l]) => `<button class="chip ${sh.anchor === v ? 'on' : ''}" data-action="rec-anchor" data-v="${esc(v)}">${esc(l)}</button>`)
     .join('')}</div>`;
@@ -685,7 +773,9 @@ function recHTML(sh) {
     ['search', '🔍 검색'],
   ];
   const kw = sh.tab === 'food' ? FOOD_KEYWORDS : sh.tab === 'cafe' ? CAFE_KEYWORDS : [];
-  const gapNote = sh.gap ? `<div class="banner slim">🍽 <b>${MEAL_LABEL[sh.gap]}</b> 자리에 넣을 곳을 고르면 그 시간대에 바로 들어가요.</div>` : '';
+  const gapNote = sh.gap
+    ? `<div class="banner slim">🍽 <b>${MEAL_LABEL[sh.gap]} ${sh.gapAt != null ? fmtTime(sh.gapAt) : ''}</b> 자리 · ${esc(sh.anchorName || '')}에서 <b>${budgetLabel(sh.budget)}</b> 맛집을 보여 드려요. 고르면 그 시간에 바로 들어가요.${sh.note ? `<br>${esc(sh.note)}` : ''}</div>`
+    : '';
   let list;
   if (sh.loading) list = `<div class="empty"><span class="spinner"></span> ${isDemo() ? '샘플에서 찾는 중…' : 'Google 지도에서 찾는 중…'}</div>`;
   else if (sh.error) list = `<div class="empty err">${esc(sh.error)}</div>`;
@@ -693,7 +783,7 @@ function recHTML(sh) {
     list = `<div class="empty">${sh.tab === 'search' ? (sh.q ? '검색 결과가 없어요.' : '장소 이름을 검색해 이 날 일정에 넣을 수 있어요.') : '주변에서 찾은 곳이 없어요. 기준 위치를 바꿔 보세요.'}</div>`;
   else {
     const sorted = [...sh.results].sort((a, b) =>
-      sh.sort === 'near' ? a.extra - b.extra : sh.sort === 'rating' ? (b.rating || 0) - (a.rating || 0) : b.score - a.score,
+      sh.sort === 'near' ? (sh.budget ? a.reach - b.reach : a.extra - b.extra) : sh.sort === 'rating' ? (b.rating || 0) - (a.rating || 0) : b.score - a.score,
     );
     list = `<ul class="rec-list">${sorted.map((p) => recItemHTML(p, sh)).join('')}</ul>`;
   }
@@ -721,7 +811,7 @@ function recHTML(sh) {
 function recItemHTML(p, sh) {
   const inDay = placeDay(p.id);
   const focus = S.ui.focus === `cand:${p.id}`;
-  const detour = p.extra <= 2 ? '동선에서 거의 안 벗어나요' : `이동 +${p.extra}분`;
+  const detour = p.reachLabel || (p.extra <= 2 ? '동선에서 거의 안 벗어나요' : `이동 +${p.extra}분`);
   return `<li class="rec ${focus ? 'is-active' : ''}" id="${candDomId(p.id)}">
     ${photoOf(p) ? `<div class="thumb"><img src="${esc(photoOf(p))}" alt="" loading="lazy">${p.photoAttr ? `<small>${esc(p.photoAttr)}</small>` : ''}</div>` : `<div class="thumb ph">${KIND[p.kind]?.icon || '📍'}</div>`}
     <button class="rec-main" data-action="focus-cand" data-id="${esc(p.id)}">
@@ -750,9 +840,11 @@ function stopSheetHTML(sh) {
   const wd = new Date(`${dayDate(t, di)}T00:00:00Z`).getUTCDay();
   const hoursToday = s.hours?.weekdayText?.[(wd + 6) % 7];
   const modes = [['AUTO', '자동'], ['WALK', '도보'], ['TRANSIT', '대중교통'], ['DRIVE', '택시']];
+  const num = computeDay(t, di, seg()).rows.find((x) => x.stop === s)?.num;
+  if (s.fixed === 'arrival') return arrivalSheetHTML(s, di, modes);
   return `
   <div class="sheet-head">
-    <div class="sh-title"><span class="stop-num" style="--c:${color(di)}">${i + 1}</span><b>${esc(s.name)}</b></div>
+    <div class="sh-title"><span class="stop-num" style="--c:${color(di)}">${num ?? i + 1}</span><b>${esc(s.name)}</b></div>
     <button class="icon-btn" data-action="close-sheet" aria-label="닫기">${ICON.close}</button>
   </div>
   <div class="sheet-body">
@@ -773,8 +865,7 @@ function stopSheetHTML(sh) {
       s.kind === 'food' || s.kind === 'cafe'
         ? `<div class="field"><label>식사로 지정</label><div class="seg">${[
             ['', '지정 안 함'],
-            ['lunch', '점심'],
-            ['dinner', '저녁'],
+            ...MEAL_TYPES,
           ]
             .map(([m, l]) => `<button class="${(s.meal || '') === m ? 'on' : ''}" data-action="stop-meal" data-uid="${esc(s.uid)}" data-v="${m}">${l}</button>`)
             .join('')}</div></div>`
@@ -782,7 +873,7 @@ function stopSheetHTML(sh) {
     }
     <div class="field"><label>순서</label>
       <div class="seg">
-        <button data-action="move" data-uid="${esc(s.uid)}" data-d="-1" ${i === 0 ? 'disabled' : ''}>▲ 앞으로</button>
+        <button data-action="move" data-uid="${esc(s.uid)}" data-d="-1" ${i === 0 || (!s.meal && i <= minInsertIndex(day)) ? 'disabled' : ''}>▲ 앞으로</button>
         <button data-action="move" data-uid="${esc(s.uid)}" data-d="1" ${i === day.stops.length - 1 ? 'disabled' : ''}>▼ 뒤로</button>
       </div>
     </div>
@@ -797,6 +888,28 @@ function stopSheetHTML(sh) {
       <a class="btn" href="${esc(placeUrl(s))}" target="_blank" rel="noopener">Google 지도 ↗</a>
     </div>
     <button class="btn btn-danger wide" data-action="remove-stop" data-uid="${esc(s.uid)}">일정에서 삭제</button>
+  </div>`;
+}
+
+// 첫날 '숙소 도착' 자리: 쉬는 시간과 공항→숙소 이동수단만 바꾼다
+function arrivalSheetHTML(s, di, modes) {
+  const t = S.trip;
+  return `
+  <div class="sheet-head">
+    <div class="sh-title"><span class="stop-num" style="--c:${color(di)}">🏨</span><b>숙소 도착 · 짐 풀고 쉬기</b></div>
+    <button class="icon-btn" data-action="close-sheet" aria-label="닫기">${ICON.close}</button>
+  </div>
+  <div class="sheet-body">
+    <p class="small"><b>${esc(s.name)}</b> · 체크인 ${t.checkIn} / 체크아웃 ${t.checkOut}</p>
+    <div class="field"><label>쉬는 시간</label>
+      <div class="stay big">
+        <button data-action="stay" data-uid="${esc(s.uid)}" data-d="-15">−15분</button><span>${fmtDur(s.stay)}</span><button data-action="stay" data-uid="${esc(s.uid)}" data-d="15">+15분</button>
+      </div>
+    </div>
+    <div class="field"><label>공항에서 숙소까지 이동수단</label>
+      <div class="seg">${modes.map(([m, l]) => `<button class="${s.mode === m ? 'on' : ''}" data-action="stop-mode" data-uid="${esc(s.uid)}" data-v="${m}">${l}</button>`).join('')}</div>
+    </div>
+    <p class="hint">공항에서 먹고 갈 식당은 타임라인의 식사 자리에서 고르면 숙소 도착 앞에 들어가요. 체크인·쉬는 시간 기본값은 설정 수정 → 숙소에서 바꿀 수 있어요.</p>
   </div>`;
 }
 
@@ -877,7 +990,16 @@ function renderMap(opts = {}) {
     fitPts.push(t.hotel);
   }
 
+  const airportMarker = (code, title) => {
+    const a = airportPoint(code);
+    markers.push({ lat: a.lat, lng: a.lng, label: '✈', style: 'hotel airport', title, z: 20 });
+    fitPts.push(a);
+  };
   if (S.ui.screen === 'setup') {
+    if (S.ui.step === 1) {
+      airportMarker(t.arrival.airport, `도착 · ${AIRPORTS[t.arrival.airport].name}`);
+      if (t.departure.airport !== t.arrival.airport) airportMarker(t.departure.airport, `출발 · ${AIRPORTS[t.departure.airport].name}`);
+    }
     t.mustSpots.forEach((m, i) => {
       markers.push({ lat: m.lat, lng: m.lng, label: i + 1, style: 'stop', color: '#334155', title: m.name, z: 30 });
       fitPts.push(m);
@@ -905,15 +1027,21 @@ function renderMap(opts = {}) {
     for (const di of days) {
       const r = computeDay(t, di, s);
       const c = color(di);
-      let prev = t.hotel;
+      let prev = r.origin;
+      if (r.win.isArrival && t.arrival) airportMarker(t.arrival.airport, `${t.arrival.time} 도착 · ${r.origin.name}`);
+      if (r.dep) {
+        airportMarker(t.departure.airport, `${t.departure.time} 출발 · ${r.dep.airport.name}`);
+        lines.push(legLine(r.dep.leg, t.hotel, r.dep.airport, c));
+      }
       r.rows.forEach((row) => {
         if (prev && row.leg) lines.push(legLine(row.leg, prev, row.stop, c));
         prev = row.stop;
+        if (row.stop.fixed) return;
         const active = S.ui.focus === row.stop.uid;
         markers.push({
           lat: row.stop.lat,
           lng: row.stop.lng,
-          label: S.ui.day === -1 ? `${di + 1}-${row.index + 1}` : row.index + 1,
+          label: S.ui.day === -1 ? `${di + 1}-${row.num}` : row.num,
           style: row.stop.kind === 'sight' ? 'stop' : `stop ${row.stop.kind}`,
           color: c,
           active,
@@ -970,11 +1098,12 @@ function recCenters(sh) {
   const t = S.trip;
   const day = t.days[S.ui.day];
   if (sh.anchor === 'hotel' && t.hotel) return [t.hotel];
+  if (sh.anchor === 'origin') return [dayOrigin(t, S.ui.day)].filter(Boolean);
   if (sh.anchor !== 'route') {
     const s = day.stops.find((x) => x.uid === sh.anchor);
     if (s) return [s];
   }
-  const pts = [t.hotel, ...day.stops].filter(Boolean);
+  const pts = [t.hotel, ...day.stops.filter((x) => !x.fixed)].filter(Boolean);
   if (pts.length <= 4) return pts;
   // 동선을 고르게 대표하는 4개 지점
   return [0, 1, 2, 3].map((k) => pts[Math.round((k * (pts.length - 1)) / 3)]);
@@ -993,7 +1122,7 @@ async function loadRec() {
     return;
   }
   const single = sh.anchor !== 'route';
-  const radius = sh.tab === 'sight' ? (single ? 1200 : 1500) : single ? 600 : 800;
+  const radius = sh.budget ? budgetRadius(sh.budget) : sh.tab === 'sight' ? (single ? 1200 : 1500) : single ? 600 : 800;
   const keyword = sh.keyword && sh.keyword !== '전체' ? sh.keyword : '';
   const token = (sh.token = uid());
   sh.loading = true;
@@ -1019,7 +1148,23 @@ async function loadRec() {
       if (sh.tab === 'food' && p.kind !== 'food') return;
       seen.set(p.id, p);
     });
-    sh.results = scoreCandidates([...seen.values()], day, centers);
+    let results = scoreCandidates([...seen.values()], day, centers);
+    sh.note = '';
+    if (sh.budget && centers.length === 1) {
+      // 식사 자리에서 오차범위 안에 갈 수 있는 곳만(추정 이동시간 기준)
+      const reachSeg = estimateSeg(t);
+      results = results.map((p) => {
+        const r = reachSeg(centers[0], p, 'AUTO');
+        return { ...p, reach: r.min, reachLabel: `${MODES[r.mode].label} 약 ${r.min}분` };
+      });
+      const within = results.filter((p) => p.reach <= sh.budget);
+      if (within.length) results = within;
+      else {
+        sh.note = `${sh.budget}분 안에 갈 수 있는 곳을 찾지 못해 가장 가까운 곳을 보여 드려요.`;
+        results = results.sort((a, b) => a.reach - b.reach).slice(0, 5);
+      }
+    }
+    sh.results = results;
   } catch (e) {
     if (sh.token !== token) return;
     sh.results = [];
@@ -1073,19 +1218,31 @@ function openRec(tab, { gap = null, anchor = null } = {}) {
   if (S.ui.day < 0) S.ui.day = 0;
   const r = computeDay(t, S.ui.day, seg());
   let a = anchor;
-  let g = gap;
-  if (!a) {
-    if (tab === 'food') {
-      const gg = r.gaps.find((x) => x.type === gap) || r.gaps[0];
-      if (gg) {
-        g = gg.type;
-        a = gg.anchor === t.hotel || !gg.anchor ? 'hotel' : gg.anchor.uid;
-      }
+  let g = null;
+  if (!a && tab === 'food') {
+    const gg = r.gaps.find((x) => x.type === gap) || r.gaps[0];
+    if (gg) {
+      g = gg;
+      a = gg.anchor?.kind === 'airport' ? 'origin' : !gg.anchor || gg.anchor === t.hotel || gg.anchor.fixed ? 'hotel' : gg.anchor.uid;
     }
-    a = a || 'route';
   }
-  if (tab !== 'food') g = null;
-  S.ui.sheet = { type: 'rec', tab, anchor: a, gap: g, keyword: '', sort: 'score', results: [], loading: false, error: '', q: '', resetScroll: true };
+  a = a || 'route';
+  S.ui.sheet = {
+    type: 'rec',
+    tab,
+    anchor: a,
+    gap: g?.type || null,
+    gapAt: g?.at ?? null,
+    budget: g?.budget || null,
+    anchorName: g ? anchorName(g.anchor) : '',
+    keyword: '',
+    sort: 'score',
+    results: [],
+    loading: false,
+    error: '',
+    q: '',
+    resetScroll: true,
+  };
   S.ui.focus = null;
   render();
   loadRec();
@@ -1122,14 +1279,15 @@ function addCandidate(id) {
   if (index == null && stop.kind === 'cafe' && day.stops.length) {
     // 카페는 오후 중간(15시 전후) 휴식 자리를 우선
     const target = Math.min(Math.max(15 * 60, r.win.start + 90), r.win.end - 60);
-    index = timedInsert(t, di, stop, target).index;
+    index = timedInsert(t, di, stop, target, minInsertIndex(day)).index;
   }
-  if (index == null) index = bestInsert(day.stops, t.hotel, stop, est()).index;
+  if (index == null) index = Math.max(minInsertIndex(day), bestInsert(day.stops, t.hotel, stop, est()).index);
   day.stops.splice(index, 0, stop);
   save();
   S.ui.focus = stop.uid;
   const after = computeDay(t, di, seg());
-  const msg = `D${di + 1} ${index + 1}번째에 추가${stop.meal ? ` (${MEAL_LABEL[stop.meal]})` : ''}${after.overflow ? ` · ⚠ ${fmtDur(after.overflow)} 초과` : ''}`;
+  const row = after.rows.find((x) => x.stop === stop);
+  const msg = `D${di + 1} ${row?.num ?? index + 1}번째에 추가${stop.meal ? ` (${MEAL_LABEL[stop.meal]} ${fmtTime(row.arrive)})` : ''}${after.overflow ? ` · ⚠ ${fmtDur(after.overflow)} 초과` : ''}`;
   toast(msg, {
     label: '되돌리기',
     fn: () => {
@@ -1191,7 +1349,7 @@ async function quickSpot(q) {
 
 function build() {
   const t = S.trip;
-  ensureDays(t);
+  syncTrip(t);
   const spots = t.mustSpots.map((m) => ({ ...m, uid: uid() }));
   t.days = autoDistribute(t, spots).map((stops) => ({ ...emptyDay(), stops }));
   t.created = true;
@@ -1201,13 +1359,14 @@ function build() {
   S.ui.sheet = null;
   S.ui.search = { q: '', results: [], loading: false, error: '' };
   render({ fit: true, resetScroll: true });
-  toast(t.mustSpots.length ? `메인 스팟 ${t.mustSpots.length}곳을 ${t.days.filter((d) => d.stops.length).length}일에 나눴어요` : '빈 일정을 만들었어요. 추천으로 채워 보세요');
+  toast(t.mustSpots.length ? `메인 스팟 ${t.mustSpots.length}곳을 ${t.days.filter((d) => d.stops.some((x) => !x.fixed)).length}일에 나눴어요` : '빈 일정을 만들었어요. 추천으로 채워 보세요');
 }
 
 // 일정 생성 후 설정을 고쳤을 때: 기존 일정은 유지하고 새/삭제된 메인 스팟만 반영
 function saveSetup() {
   const t = S.trip;
-  ensureDays(t);
+  if (tripNights(t) < 1) return toast('출발 날짜가 도착 날짜보다 뒤여야 해요');
+  syncTrip(t);
   const ids = new Set(t.mustSpots.map((m) => m.id));
   t.days.forEach((d) => (d.stops = d.stops.filter((s) => !s.must || ids.has(s.id))));
   const e = est();
@@ -1216,9 +1375,9 @@ function saveSetup() {
     let best = null;
     t.days.forEach((d, di) => {
       const ins = bestInsert(d.stops, t.hotel, m, e);
-      const free = dayCapacity(t, di) - d.stops.reduce((s, x) => s + x.stay, 0) - m.stay;
+      const free = dayCapacity(t, di) - d.stops.reduce((s, x) => s + (x.fixed ? 0 : x.stay), 0) - m.stay;
       const score = ins.extra + (free < 0 ? 600 : 0);
-      if (!best || score < best.score) best = { di, index: ins.index, score };
+      if (!best || score < best.score) best = { di, index: Math.max(minInsertIndex(d), ins.index), score };
     });
     t.days[best.di].stops.splice(best.index, 0, { ...m, uid: uid() });
   }
@@ -1234,17 +1393,21 @@ function itineraryText() {
   const t = S.trip;
   const s = seg();
   const out = [`[도쿄 ${t.nights}박 ${t.nights + 1}일] ${dayLabel(t, 0)} ~ ${dayLabel(t, t.nights)} · ${t.people}명`];
-  if (t.hotel) out.push(`숙소: ${t.hotel.name}`);
+  out.push(`도착: ${dayLabel(t, 0)} ${t.arrival.time} ${AIRPORTS[t.arrival.airport].name} / 출발: ${dayLabel(t, t.nights)} ${t.departure.time} ${AIRPORTS[t.departure.airport].name}`);
+  if (t.hotel) out.push(`숙소: ${t.hotel.name} (체크인 ${t.checkIn} · 체크아웃 ${t.checkOut})`);
   t.days.forEach((d, di) => {
     const r = computeDay(t, di, s);
     out.push('', `■ D${di + 1} ${dayLabel(t, di)}`);
-    if (t.hotel) out.push(`${fmtTime(r.win.start)} 숙소 출발`);
+    if (r.win.isArrival && t.arrival) out.push(`${fmtTime(r.win.start)} ${r.origin.name} 출발`);
+    else if (t.hotel && r.rows.length) out.push(`${fmtTime(r.win.start)} 숙소 출발`);
     r.rows.forEach((row) => {
-      const leg = row.leg ? ` (${MODES[row.leg.mode].label} ${fmtDur(row.leg.min)})` : '';
-      out.push(`${fmtTime(row.arrive)}-${fmtTime(row.depart)} ${row.stop.name}${row.stop.meal ? ` [${MEAL_LABEL[row.stop.meal]}]` : ''}${leg}`);
+      const leg = row.leg?.min ? ` (${MODES[row.leg.mode].label} ${fmtDur(row.leg.min)})` : '';
+      const name = row.stop.fixed === 'arrival' ? '숙소 도착·짐 풀기' : row.stop.name;
+      out.push(`${fmtTime(row.arrive)}-${fmtTime(row.depart)} ${name}${row.stop.meal ? ` [${MEAL_LABEL[row.stop.meal]}]` : ''}${leg}`);
     });
     if (r.back) out.push(`${fmtTime(r.end)} 숙소 복귀`);
-    if (!r.rows.length) out.push('(일정 없음)');
+    if (r.dep) out.push(`${fmtTime(r.dep.leaveBy)} 공항으로 출발 → ${fmtTime(r.dep.atAirport)} ${r.dep.airport.name} 도착 · ${t.departure.time} 이륙`);
+    if (!r.rows.length && !r.dep) out.push('(일정 없음)');
   });
   return out.join('\n');
 }
@@ -1290,14 +1453,14 @@ const actions = {
   },
   'goto-step': (d) => {
     const n = Number(d.step);
+    if (n > 1 && tripNights(S.trip) < 1) return toast('출발 날짜가 도착 날짜보다 뒤여야 해요');
     if (n > 2 && !S.trip.hotel) return toast('숙소를 먼저 선택해 주세요');
     S.ui.step = n;
     S.ui.search = { q: '', results: [], loading: false, error: '' };
     render({ resetScroll: true });
   },
   set: (d) => {
-    const num = ['walkLimitKm', 'mealMinutes'].includes(d.field);
-    S.trip[d.field] = num ? Number(d.value) : d.value;
+    setPath(S.trip, d.field, NUM_FIELDS.includes(d.field) ? Number(d.value) : d.value);
     save();
     render();
   },
@@ -1352,7 +1515,8 @@ const actions = {
   stay: (d) => {
     const f = findStop(d.uid);
     if (!f) return;
-    f.s.stay = Math.max(15, f.s.stay + Number(d.d));
+    if (f.s.fixed === 'arrival') S.trip.restMin = f.s.stay = Math.max(0, f.s.stay + Number(d.d));
+    else f.s.stay = Math.max(15, f.s.stay + Number(d.d));
     save();
     render();
   },
@@ -1364,6 +1528,8 @@ const actions = {
     if (type === 'back') {
       const day = S.trip.days[Number(ref)];
       day.returnMode = now = next(day.returnMode);
+    } else if (type === 'airout') {
+      S.trip.departure.mode = now = next(S.trip.departure.mode);
     } else {
       const f = findStop(ref);
       if (!f) return;
@@ -1410,6 +1576,7 @@ const actions = {
   'rec-anchor': (d) => {
     S.ui.sheet.anchor = d.v;
     S.ui.sheet.gap = null;
+    S.ui.sheet.budget = null;
     S.ui.sheet.resetScroll = true;
     loadRec();
   },
@@ -1458,7 +1625,7 @@ const actions = {
     S.trip.days[f.di].stops.splice(f.i, 1);
     const target = S.trip.days[to];
     f.s.meal = null;
-    target.stops.splice(bestInsert(target.stops, S.trip.hotel, f.s, est()).index, 0, f.s);
+    target.stops.splice(Math.max(minInsertIndex(target), bestInsert(target.stops, S.trip.hotel, f.s, est()).index), 0, f.s);
     save();
     S.ui.sheet = null;
     render();
@@ -1466,6 +1633,7 @@ const actions = {
   },
   'remove-stop': (d) => {
     const f = findStop(d.uid);
+    if (!f || f.s.fixed) return;
     S.trip.days[f.di].stops.splice(f.i, 1);
     save();
     S.ui.sheet = null;
@@ -1559,7 +1727,7 @@ const actions = {
   },
   reset: async () => {
     if (!(await ask('모든 일정을 지우고 처음부터 다시 만들까요? (API 키는 유지돼요)', '전체 초기화', true))) return;
-    S.trip = ensureDays(defaultTrip());
+    S.trip = syncTrip(defaultTrip());
     save();
     S.ui = { ...S.ui, screen: 'setup', step: 1, day: 0, sheet: null, focus: null, search: { q: '', results: [], loading: false, error: '' } };
     render({ fit: true, resetScroll: true });
@@ -1578,11 +1746,11 @@ function onClick(e) {
 function onChange(e) {
   const el = e.target;
   if (el.matches('[data-field]')) {
-    let v = el.value;
-    if (!v) return render();
-    if (el.dataset.type === 'num') v = Number(v);
-    S.trip[el.dataset.field] = v;
-    if (el.dataset.field === 'nights') ensureDays(S.trip);
+    let v = el.type === 'checkbox' ? el.checked : el.value;
+    if (v === '') return render();
+    if (el.dataset.type === 'bool-inv') v = !v;
+    else if (NUM_FIELDS.includes(el.dataset.field)) v = Number(v);
+    setPath(S.trip, el.dataset.field, v);
     save();
     render();
   } else if (el.matches('[data-import]')) {

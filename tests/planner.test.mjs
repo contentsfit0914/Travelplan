@@ -12,6 +12,8 @@ import {
   kindFromTypes,
   optimizeDay,
   fmtTime,
+  minInsertIndex,
+  budgetRadius,
 } from '../js/planner.js';
 import { DEMO_PLACES } from '../js/data/demo-places.js';
 
@@ -28,13 +30,21 @@ function trip(extra = {}) {
     baseMode: 'TRANSIT',
     walkLimitKm: 1,
     pace: 'normal',
-    arriveTime: '14:00',
-    departTime: '12:00',
+    arrival: { date: '2026-11-19', time: '14:00', airport: 'HND', mode: 'AUTO' },
+    departure: { date: '2026-11-23', time: '18:00', airport: 'HND', mode: 'AUTO' },
+    immigrationMin: 0,
+    airportBufferMin: 120,
+    checkIn: '15:00',
+    checkOut: '11:00',
+    restMin: 30,
     dayStart: '09:30',
     dayEnd: '21:00',
+    breakfastOn: false,
+    breakfast: '08:30',
     lunch: '12:00',
     dinner: '18:30',
     mealMinutes: 75,
+    mealTolerance: 30,
     hotel: byId('h-shinjuku'),
     days: Array.from({ length: 5 }, () => ({ stops: [], returnMode: 'AUTO', skipMeals: [] })),
     ...extra,
@@ -66,11 +76,14 @@ test('식사 공백: 점심 시간대에 식당이 없으면 그 자리에 공�
   assert.ok(r.gaps.find((g) => g.type === 'dinner'));
 });
 
-test('식사 공백: 첫날(14시 도착)은 점심, 마지막 날(12시 복귀)은 저녁을 요구하지 않는다', () => {
+test('식사 공백: 첫날(14시 도착)은 점심, 마지막 날(18시 이륙)은 저녁을 요구하지 않는다', () => {
   const t = trip();
   const seg = () => ({ min: 10, km: 1, mode: 'TRANSIT' });
   assert.deepEqual(computeDay(t, 0, seg).gaps.map((g) => g.type), ['dinner']);
-  assert.deepEqual(computeDay(t, 4, seg).gaps.map((g) => g.type), []);
+  assert.deepEqual(computeDay(t, 4, seg).gaps.map((g) => g.type), ['lunch']);
+  // 오전 비행기면 마지막 날 식사 자리는 없다
+  const early = trip({ departure: { date: '2026-11-23', time: '11:00', airport: 'HND', mode: 'AUTO' } });
+  assert.deepEqual(computeDay(early, 4, seg).gaps.map((g) => g.type), []);
 });
 
 test('식사 공백: 점심 지정 식당이 있으면 공백이 사라진다', () => {
@@ -152,4 +165,88 @@ test('자동 배분: 스팟이 일수보다 적어도 가까운 곳(센소지·�
   const dayOf = (id) => days.findIndex((d) => d.some((s) => s.uid === id));
   assert.equal(dayOf('sensoji'), dayOf('skytree'));
   assert.equal(days.flat().length, 5);
+});
+
+// ---- 항공편·식사 오차범위 -------------------------------------------------
+// 공항 구간 60분, 그 밖 10분으로 고정한 이동시간
+const airSeg = (a, b) => ({ min: a.kind === 'airport' || b.kind === 'airport' ? 60 : 10, km: 1, mode: 'TRANSIT' });
+const withArrivalStop = (t) => {
+  t.days[0].stops = [{ ...t.hotel, uid: 'arr', kind: 'hotel', fixed: 'arrival', stay: t.restMin, mode: 'AUTO', meal: null }];
+  return t;
+};
+
+test('도착일 예시: 11시 도착·숙소까지 1시간·휴식 30분, 점심 12시 오차 10분 → 12:30 숙소 근처 가까운 곳', () => {
+  const t = withArrivalStop(trip({ arrival: { date: '2026-11-19', time: '11:00', airport: 'HND', mode: 'AUTO' }, mealTolerance: 10 }));
+  const r = computeDay(t, 0, airSeg);
+  assert.equal(fmtTime(r.rows[0].arrive), '12:00');
+  assert.equal(fmtTime(r.rows[0].depart), '12:30');
+  const lunch = r.gaps.find((g) => g.type === 'lunch');
+  assert.equal(fmtTime(lunch.at), '12:30'); // 11:00(60분 빠름)보다 12:30(30분 늦음)이 목표에 가깝다
+  assert.equal(lunch.index, 1);
+  assert.equal(lunch.anchor.fixed, 'arrival');
+  assert.equal(lunch.ok, false); // 오차범위 10분 밖
+  assert.equal(lunch.budget, 10); // 이미 늦었으니 가장 가까운 곳(10분)
+});
+
+test('도착일 예시: 같은 상황에 오차범위 1시간이면 30분 안에 갈 수 있는 곳까지 넓힌다', () => {
+  const t = withArrivalStop(trip({ arrival: { date: '2026-11-19', time: '11:00', airport: 'HND', mode: 'AUTO' }, mealTolerance: 60 }));
+  const lunch = computeDay(t, 0, airSeg).gaps.find((g) => g.type === 'lunch');
+  assert.equal(fmtTime(lunch.at), '12:30');
+  assert.equal(lunch.ok, true);
+  assert.equal(lunch.budget, 30); // 13:00(12:00+1시간)까지 30분
+  assert.ok(budgetRadius(30) > budgetRadius(10));
+});
+
+test('도착일: 공항에서 먹는 쪽이 목표에 더 가까우면 숙소 도착 전(공항)에 식사 자리를 잡는다', () => {
+  const t = withArrivalStop(trip({ arrival: { date: '2026-11-19', time: '11:40', airport: 'NRT', mode: 'AUTO' }, mealTolerance: 30 }));
+  const lunch = computeDay(t, 0, airSeg).gaps.find((g) => g.type === 'lunch');
+  assert.equal(lunch.index, 0);
+  assert.equal(lunch.anchor.kind, 'airport');
+  assert.equal(fmtTime(lunch.at), '11:40');
+  assert.equal(lunch.budget, 50); // 12:30까지
+});
+
+test('입국 수속 여유만큼 공항 출발이 늦어진다', () => {
+  const t = withArrivalStop(trip({ arrival: { date: '2026-11-19', time: '11:00', airport: 'HND', mode: 'AUTO' }, immigrationMin: 60 }));
+  const r = computeDay(t, 0, airSeg);
+  assert.equal(fmtTime(r.win.start), '12:00');
+  assert.equal(fmtTime(r.rows[0].arrive), '13:00');
+});
+
+test('귀국일: 이륙 18:00 - 공항 여유 2시간 - 숙소→공항 1시간 = 15:00까지 숙소 출발', () => {
+  const t = trip();
+  t.days[4].stops = [byId('gyoen')];
+  const r = computeDay(t, 4, airSeg);
+  assert.equal(fmtTime(r.dep.leaveBy), '15:00');
+  assert.equal(fmtTime(r.dep.atAirport), '16:00');
+  assert.equal(fmtTime(r.win.rawEnd), '15:00');
+  t.days[4].stops[0].stay = 330; // 09:40~15:10 → 복귀 15:20
+  assert.equal(computeDay(t, 4, airSeg).overflow, 20);
+});
+
+test('아침은 건너뛰기가 기본, 켜면 식사 자리가 생긴다', () => {
+  const seg = () => ({ min: 10, km: 1, mode: 'TRANSIT' });
+  assert.ok(!computeDay(trip(), 1, seg).gaps.some((g) => g.type === 'breakfast'));
+  const on = trip({ breakfastOn: true, breakfast: '09:00', dayStart: '09:00' });
+  const b = computeDay(on, 1, seg).gaps.find((g) => g.type === 'breakfast');
+  assert.ok(b);
+  assert.equal(b.index, 0);
+});
+
+test('첫날 숙소 도착 전에는 관광지를 넣지 않는다', () => {
+  const t = withArrivalStop(trip());
+  assert.equal(minInsertIndex(t.days[0]), 1);
+  assert.equal(minInsertIndex(t.days[1]), 0);
+  t.days[0].stops.push(byId('gyoen'), byId('tocho'));
+  const out = optimizeDay(t, 0);
+  assert.equal(out[0].fixed, 'arrival');
+});
+
+test('그날 마지막 일정 뒤의 식사는 목표 시각까지 기다렸다 잡는다', () => {
+  const t = trip();
+  t.days[1].stops = [byId('gyoen')];
+  const seg = () => ({ min: 10, km: 1, mode: 'TRANSIT' });
+  const dinner = computeDay(t, 1, seg).gaps.find((g) => g.type === 'dinner');
+  assert.equal(fmtTime(dinner.at), '18:30');
+  assert.equal(dinner.ok, true);
 });

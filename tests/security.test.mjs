@@ -77,8 +77,8 @@ test('불러온 파일의 위험한 값은 제거·대체된다', () => {
   assert.deepEqual(s.types, ['restaurant']);
   assert.equal(t.days[0].returnMode, 'AUTO');
   assert.equal(t.hotel, null);
-  assert.equal(t.nights, 7);
-  assert.equal(t.days.length, 8);
+  assert.equal(t.nights, 9);
+  assert.equal(t.days.length, 10);
   assert.match(t.startDate, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(t.lunch, '12:00');
   assert.ok(!('apiKey' in t));

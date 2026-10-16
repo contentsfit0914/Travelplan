@@ -70,19 +70,57 @@ export const dayLabel = (trip, di) => {
   return `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}(${WD[weekday(d)]})`;
 };
 
-// 하루 가용 시간: 첫날은 숙소 도착 후, 마지막 날은 숙소 복귀 시각까지
-export function dayWindow(trip, di) {
-  const last = trip.days.length - 1;
-  const start = toMin(di === 0 ? trip.arriveTime : trip.dayStart);
-  const end = toMin(di === last ? trip.departTime : trip.dayEnd);
-  return { start, end: Math.max(end, start), isArrival: di === 0, isDeparture: di === last };
+// --- 공항·항공편 -------------------------------------------------------------
+// 좌표는 공항 중심 근사치. 터미널별 차이는 이동시간 추정 오차 범위 안이다.
+export const AIRPORTS = {
+  HND: { code: 'HND', name: '하네다 공항', lat: 35.5494, lng: 139.7798 },
+  NRT: { code: 'NRT', name: '나리타 공항', lat: 35.772, lng: 140.3929 },
+};
+export function airportPoint(code) {
+  const a = AIRPORTS[code] || AIRPORTS.HND;
+  return { id: `airport:${a.code}`, name: a.name, lat: a.lat, lng: a.lng, kind: 'airport', types: ['airport'] };
+}
+// 첫날 공항을 나서는 시각(도착 + 입국 수속 여유)
+export const arrivalReady = (trip) => toMin(trip.arrival.time) + (trip.immigrationMin || 0);
+// 하루의 출발점: 첫날은 공항, 그 외는 숙소
+export const dayOrigin = (trip, di) => (di === 0 && trip.arrival ? airportPoint(trip.arrival.airport) : trip.hotel);
+
+// 마지막 날: 이륙 - 공항 도착 여유 - 숙소→공항 이동 = 숙소에서 늦어도 출발해야 하는 시각
+export function departurePlan(trip, seg) {
+  if (!trip.departure || !trip.hotel) return null;
+  const airport = airportPoint(trip.departure.airport);
+  const flight = toMin(trip.departure.time);
+  const atAirport = flight - (trip.airportBufferMin ?? 120);
+  const di = trip.days.length - 1;
+  const leg = seg(trip.hotel, airport, trip.departure.mode || 'AUTO', { di, t: atAirport - 90 });
+  return { airport, flight, atAirport, leg, leaveBy: atAirport - leg.min };
 }
 
-const MEALS = [
-  ['lunch', 'lunch', '점심'],
-  ['dinner', 'dinner', '저녁'],
+// 하루 가용 시간: 첫날은 공항을 나선 뒤부터, 마지막 날은 공항으로 떠나야 하는 시각까지
+export function dayWindow(trip, di, seg = estimateSeg(trip)) {
+  const last = trip.days.length - 1;
+  let start = toMin(trip.dayStart);
+  let end = toMin(trip.dayEnd);
+  if (di === 0 && trip.arrival) start = arrivalReady(trip);
+  const dep = di === last ? departurePlan(trip, seg) : null;
+  if (dep) end = Math.min(end, dep.leaveBy);
+  return { start, end: Math.max(end, start), rawEnd: end, isArrival: di === 0, isDeparture: di === last, dep };
+}
+
+export const MEAL_TYPES = [
+  ['breakfast', '아침'],
+  ['lunch', '점심'],
+  ['dinner', '저녁'],
 ];
-export const MEAL_LABEL = { lunch: '점심', dinner: '저녁' };
+export const MEAL_LABEL = { breakfast: '아침', lunch: '점심', dinner: '저녁' };
+export const mealEnabled = (trip, type) => type !== 'breakfast' || !!trip.breakfastOn;
+
+// 맛집 탐색 범위: 식사 자리에서 이동에 쓸 수 있는 시간(분) → 검색 반경(m)
+export function budgetRadius(min) {
+  if (min <= 15) return Math.max(500, Math.round(min * 75)); // 도보 4.5km/h
+  return Math.min(8000, Math.round(((min - 10) * 28 * 1000) / 60)); // 대중교통 평균 28km/h
+}
+export const budgetLabel = (min) => (min <= 15 ? `도보 ${min}분 이내` : `${min}분 이내로 갈 수 있는`);
 
 // --- 영업시간 -------------------------------------------------------------
 const WEEK = 7 * 1440;
@@ -110,14 +148,17 @@ export function hoursWarning(stop, dateStr, arrive, depart) {
 }
 
 // --- 하루 시간표 ----------------------------------------------------------
-// seg(a, b, modePref) → { min, km, mode, estimated }
+// seg(a, b, modePref, ctx) → { min, km, mode, estimated }
 export function computeDay(trip, di, seg) {
   const day = trip.days[di];
   const hotel = trip.hotel;
-  const win = dayWindow(trip, di);
+  const win = dayWindow(trip, di, seg);
   const date = dayDate(trip, di);
+  const origin = dayOrigin(trip, di);
+  const tol = trip.mealTolerance ?? 30;
   let t = win.start;
-  let prev = hotel;
+  let prev = origin;
+  let num = 0;
   const rows = [];
   const totals = { travel: 0, sight: 0, meal: 0 };
 
@@ -127,41 +168,62 @@ export function computeDay(trip, di, seg) {
     const depart = arrive + stop.stay;
     totals.travel += leg ? leg.min : 0;
     if (stop.kind === 'food' || stop.kind === 'cafe') totals.meal += stop.stay;
-    else totals.sight += stop.stay;
-    rows.push({ stop, index, leg, arrive, depart, warn: hoursWarning(stop, date, arrive, depart) });
+    else if (stop.kind !== 'hotel') totals.sight += stop.stay;
+    let warn = hoursWarning(stop, date, arrive, depart);
+    let info = null;
+    if (stop.fixed === 'arrival') {
+      info = arrive < toMin(trip.checkIn) ? `체크인(${trip.checkIn}) 전이라 짐만 맡기고 쉬어요` : '체크인하고 짐 풀기';
+    }
+    if (stop.meal && !warn && trip[stop.meal]) {
+      const d = arrive - toMin(trip[stop.meal]);
+      if (Math.abs(d) > tol)
+        warn = `${MEAL_LABEL[stop.meal]} 목표 ${trip[stop.meal]}보다 ${fmtDur(Math.abs(d))} ${d > 0 ? '늦어요' : '빨라요'} (오차범위 ${fmtDur(tol)})`;
+    }
+    rows.push({ stop, index, num: stop.fixed ? null : ++num, leg, arrive, depart, warn, info });
     t = depart;
     prev = stop;
   });
 
-  const back = hotel && day.stops.length ? seg(prev, hotel, day.returnMode, { di, t }) : null;
+  const back = hotel && rows.length && prev.kind !== 'hotel' ? seg(prev, hotel, day.returnMode, { di, t }) : null;
   const end = t + (back ? back.min : 0);
   totals.travel += back ? back.min : 0;
 
+  // 식사 자리: 목표 시각과 가장 가까운 '빈 틈'(이전 장소를 떠나는 시각)을 고른다
   const gaps = [];
-  for (const [type, key, label] of MEALS) {
-    if (day.skipMeals?.includes(type)) continue;
-    const time = toMin(trip[key]);
-    if (win.start > time + 30 || win.end < time + 30) continue;
+  for (const [type, label] of MEAL_TYPES) {
+    if (!mealEnabled(trip, type) || day.skipMeals?.includes(type)) continue;
+    const T = toMin(trip[type]);
+    if (T + tol < win.start || T - tol > win.rawEnd) continue;
     const covered = rows.some(
-      (r) =>
-        r.stop.meal === type ||
-        (r.stop.kind === 'food' && !r.stop.meal && r.arrive >= time - 90 && r.arrive <= time + 120),
+      (r) => r.stop.meal === type || (r.stop.kind === 'food' && !r.stop.meal && Math.abs(r.arrive - T) <= tol + 30),
     );
     if (covered) continue;
-    let index = rows.findIndex((r) => r.arrive >= time);
-    if (index < 0) index = rows.length;
-    const anchor = index > 0 ? rows[index - 1].stop : hotel;
-    gaps.push({ type, label, time, index, anchor });
+    let best = null;
+    for (let i = 0; i <= rows.length; i++) {
+      const free = i === 0 ? win.start : rows[i - 1].depart;
+      // 그날 마지막 자리(뒤에 일정 없음)는 목표 시각까지 기다렸다 먹는다. 중간 자리는 바로 먹는다(뒤 일정이 밀리므로)
+      const at = i === rows.length ? Math.max(free, T) : free;
+      const dev = at - T;
+      if (!best || Math.abs(dev) < Math.abs(best.dev)) best = { index: i, at, dev };
+    }
+    const anchor = best.index === 0 ? origin : rows[best.index - 1].stop;
+    // 오차범위 끝(목표+오차)까지 남은 시간만큼 멀리 있는 식당까지 후보로 본다. 이미 늦었으면 가장 가까운 곳(10분)
+    const budget = Math.min(60, Math.max(10, T + tol - best.at));
+    gaps.push({ type, label, time: T, tol, ok: Math.abs(best.dev) <= tol, budget, anchor, ...best });
   }
 
+  const dep = win.dep;
+  const overflow = !rows.length ? 0 : Math.max(0, end - win.rawEnd);
   return {
     win,
     date,
+    origin,
     rows,
     back,
     end,
-    overflow: Math.max(0, end - win.end),
-    free: Math.max(0, win.end - end),
+    dep,
+    overflow,
+    free: Math.max(0, win.rawEnd - Math.max(end, win.start)),
     totals,
     gaps,
   };
@@ -199,12 +261,12 @@ export function bestInsert(stops, hotel, cand, est) {
 }
 
 // 카페처럼 '언제 가면 좋은지'가 있는 장소: 추가 이동시간 + 목표 시각과의 차이를 함께 최소화
-export function timedInsert(trip, di, cand, target) {
+export function timedInsert(trip, di, cand, target, minIndex = 0) {
   const day = trip.days[di];
   const segFn = estimateSeg(trip);
   const base = computeDay(trip, di, segFn).totals.travel;
   let best = { index: day.stops.length, score: Infinity, extra: 0 };
-  for (let i = 0; i <= day.stops.length; i++) {
+  for (let i = minIndex; i <= day.stops.length; i++) {
     const trial = [...day.stops.slice(0, i), cand, ...day.stops.slice(i)];
     const sim = computeDay({ ...trip, days: trip.days.map((d, k) => (k === di ? { ...d, stops: trial } : d)) }, di, segFn);
     const row = sim.rows[i];
@@ -214,6 +276,9 @@ export function timedInsert(trip, di, cand, target) {
   }
   return { index: best.index, extra: best.extra };
 }
+
+// 첫날 '숙소 도착' 이전에는 식사 말고는 넣지 않는다(짐을 들고 다니지 않도록)
+export const minInsertIndex = (day) => day.stops.findIndex((s) => s.fixed === 'arrival') + 1;
 
 // --- 동선 최적화 ------------------------------------------------------------
 function tourCost(order, hotel, est) {
@@ -269,17 +334,21 @@ export function optimizeDay(trip, di) {
   const day = trip.days[di];
   const est = estimator(trip);
   const timed = (s) => s.meal || s.kind === 'cafe';
-  const meals = day.stops.filter(timed);
-  let stops = optimizeOrder(
-    day.stops.filter((s) => !timed(s)),
-    trip.hotel,
-    est,
-  );
+  const fixed = day.stops.filter((s) => s.fixed);
+  const meals = day.stops.filter((s) => !s.fixed && timed(s));
+  let stops = [
+    ...fixed,
+    ...optimizeOrder(
+      day.stops.filter((s) => !s.fixed && !timed(s)),
+      trip.hotel,
+      est,
+    ),
+  ];
   const segFn = estimateSeg(trip);
   for (const m of meals.sort((a, b) => targetTime(trip, a) - targetTime(trip, b))) {
     const target = targetTime(trip, m);
     let best = { i: stops.length, score: Infinity };
-    for (let i = 0; i <= stops.length; i++) {
+    for (let i = m.meal ? 0 : fixed.length; i <= stops.length; i++) {
       const trial = [...stops.slice(0, i), m, ...stops.slice(i)];
       const sim = computeDay({ ...trip, days: trip.days.map((d, k) => (k === di ? { ...d, stops: trial } : d)) }, di, segFn);
       const row = sim.rows.find((r) => r.stop === m);
@@ -294,11 +363,17 @@ export function optimizeDay(trip, di) {
 
 // --- 메인 스팟 자동 배분 ----------------------------------------------------
 export function dayCapacity(trip, di) {
-  const w = dayWindow(trip, di);
-  let cap = w.end - w.start;
-  for (const [, key] of MEALS) {
-    const t = toMin(trip[key]);
-    if (w.start <= t + 30 && w.end >= t + 30) cap -= trip.mealMinutes;
+  const seg = estimateSeg(trip);
+  const w = dayWindow(trip, di, seg);
+  let start = w.start;
+  if (di === 0 && trip.arrival && trip.hotel) start += seg(dayOrigin(trip, 0), trip.hotel).min + (trip.restMin ?? 30);
+  const end = w.rawEnd;
+  const tol = trip.mealTolerance ?? 30;
+  let cap = end - start;
+  for (const [type] of MEAL_TYPES) {
+    if (!mealEnabled(trip, type)) continue;
+    const T = toMin(trip[type]);
+    if (T + tol >= start && T - tol <= end) cap -= trip.mealMinutes;
   }
   return Math.max(0, cap);
 }
