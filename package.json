@@ -1,0 +1,11 @@
+{
+  "name": "tokyo-travel-planner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "도쿄 여행 일정 플래너 (Google Maps Platform 기반, 모바일 우선 정적 웹앱)",
+  "type": "module",
+  "scripts": {
+    "start": "npx --yes serve -l 5173 .",
+    "test": "node --test tests/*.test.mjs"
+  }
+}
