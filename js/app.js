@@ -10,6 +10,7 @@ import {
   defaultStay,
   autoDistribute,
   optimizeDay,
+  classifyPlace,
   bestInsert,
   timedInsert,
   estimator,
@@ -746,7 +747,9 @@ function dayHTML(di) {
   if (r.win.isArrival && t.arrival) {
     parts.push(anchorHTML(r.win.start, '🛬', `${esc(r.origin.name)} 출발`, `${t.arrival.time} 도착${t.immigrationMin ? ` + 입국 수속 ${fmtDur(t.immigrationMin)}` : ''}`));
   } else if (t.hotel && (r.rows.length || !r.dep)) {
-    parts.push(anchorHTML(r.win.start, '🏨', `${esc(t.hotel.name)} 출발`, r.dep ? `체크아웃 ${t.checkOut} · 짐은 숙소에 맡겨 두세요` : ''));
+    // 첫 장소가 식사라 기다려야 하면 그만큼 늦게 출발
+    const lateStart = r.rows[0]?.wait || 0;
+    parts.push(anchorHTML(r.win.start + lateStart, '🏨', `${esc(t.hotel.name)} 출발`, r.dep ? `체크아웃 ${t.checkOut} · 짐은 숙소에 맡겨 두세요` : lateStart ? `${fmtTime(r.win.start)}부터 ${fmtDur(lateStart)} 여유` : ''));
   }
   let prev = r.origin;
   let free = r.win.start;
@@ -758,6 +761,8 @@ function dayHTML(di) {
   };
   r.rows.forEach((row, i) => {
     r.gaps.filter((g) => g.index === i).forEach(gapWithFree);
+    // 식사 시각까지 기다리는 시간(첫 장소는 출발을 늦춘 것으로 표시)
+    if (!edit && i > 0 && row.wait >= 30) parts.push(freeHTML(free, free + row.wait, prev));
     parts.push(legHTML(row.leg, prev, row.stop, `stop:${row.stop.uid}`, row.stop.mode, di, edit));
     parts.push(stopHTML(row, di, edit, day));
     prev = row.stop;
@@ -1623,10 +1628,16 @@ async function quickSpot(q) {
   render({ fit: true });
 }
 
-function build() {
+function build(opts = {}) {
   const t = S.trip;
+  // 새로 짤 때는 직접 추가한 장소·식사·건너뛰기를 모두 지우고 메인 스팟만으로 시작
+  t.days = t.days.map((d) => ({ ...emptyDay(), stops: d.stops.filter((s) => s.fixed) }));
   syncTrip(t);
-  const spots = t.mustSpots.map((m) => ({ ...m, uid: uid() }));
+  const spots = t.mustSpots.map((m) => {
+    const kind = classifyPlace(m.types, m.typeLabel, m.kind);
+    const stay = kind !== m.kind ? defaultStay({ ...m, kind }) : m.stay;
+    return { ...m, kind, stay, meal: null, uid: uid() };
+  });
   t.days = autoDistribute(t, spots).map((stops) => ({ ...emptyDay(), stops }));
   t.created = true;
   save();
@@ -1635,33 +1646,21 @@ function build() {
   S.ui.sheet = null;
   S.ui.search = { q: '', results: [], loading: false, error: '' };
   render({ fit: true, resetScroll: true });
-  toast(t.mustSpots.length ? `메인 스팟 ${t.mustSpots.length}곳을 ${t.days.filter((d) => d.stops.some((x) => !x.fixed)).length}일에 나눴어요` : '빈 일정을 만들었어요. 추천으로 채워 보세요');
+  const meals = t.days.flatMap((d) => d.stops).filter((x) => x.must && x.meal).length;
+  toast(
+    t.mustSpots.length
+      ? `${opts.rebuilt ? '바뀐 설정으로 일정을 새로 짰어요 · ' : ''}메인 스팟 ${t.mustSpots.length}곳을 ${t.days.filter((d) => d.stops.some((x) => !x.fixed)).length}일에 나눴어요${meals ? ` (식당 ${meals}곳은 식사 시간에)` : ''}`
+      : '빈 일정을 만들었어요. 추천으로 채워 보세요',
+  );
 }
 
-// 일정 생성 후 설정을 고쳤을 때: 기존 일정은 유지하고 새/삭제된 메인 스팟만 반영
-function saveSetup() {
+// 일정 생성 후 설정을 고쳤을 때: 바뀐 설정으로 일정을 처음부터 다시 짠다(직접 추가한 장소는 초기화)
+async function saveSetup() {
   const t = S.trip;
   if (tripNights(t) < 1) return toast('출발 날짜가 도착 날짜보다 뒤여야 해요');
-  syncTrip(t);
-  const ids = new Set(t.mustSpots.map((m) => m.id));
-  t.days.forEach((d) => (d.stops = d.stops.filter((s) => !s.must || ids.has(s.id))));
-  const e = est();
-  for (const m of t.mustSpots) {
-    if (placeDay(m.id) != null) continue;
-    let best = null;
-    t.days.forEach((d, di) => {
-      const ins = bestInsert(d.stops, t.hotel, m, e);
-      const free = dayCapacity(t, di) - d.stops.reduce((s, x) => s + (x.fixed ? 0 : x.stay), 0) - m.stay;
-      const score = ins.extra + (free < 0 ? 600 : 0);
-      if (!best || score < best.score) best = { di, index: Math.max(minInsertIndex(d), ins.index), score };
-    });
-    t.days[best.di].stops.splice(best.index, 0, { ...m, uid: uid() });
-  }
-  save();
-  S.ui.screen = 'plan';
-  S.ui.search = { q: '', results: [], loading: false, error: '' };
-  render({ fit: true, resetScroll: true });
-  toast('변경 사항을 반영했어요');
+  const added = t.days.some((d) => d.stops.some((s) => !s.must && !s.fixed) || d.skipMeals?.length);
+  if (added && !(await ask('저장하면 바뀐 설정으로 일정을 새로 짜요. 직접 추가한 식사·관광지와 순서 변경은 지워지고 메인 스팟만 다시 배치돼요.', '새로 짜기'))) return;
+  build({ rebuilt: true });
 }
 
 // ---------------------------------------------------------------- 공유

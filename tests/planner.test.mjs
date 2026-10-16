@@ -250,3 +250,51 @@ test('그날 마지막 일정 뒤의 식사는 목표 시각까지 기다렸다 
   assert.equal(fmtTime(dinner.at), '18:30');
   assert.equal(dinner.ok, true);
 });
+
+// ---- 음식점 메인 스팟은 식사 자리로 ---------------------------------------
+import { classifyPlace, arrangeStops } from '../js/planner.js';
+
+test('메인 스팟 음식점은 점심·저녁 자리에 배정되고 그 시간 근처에 도착한다', () => {
+  const t = trip();
+  const spots = ['gyoen', 'tocho', 'meiji', 'takeshita', 'f-omoide', 'f-shibuyayoko'].map(byId);
+  const days = autoDistribute(t, spots);
+  const seg = estimateSeg(t);
+  for (const id of ['f-omoide', 'f-shibuyayoko']) {
+    const di = days.findIndex((d) => d.some((s) => s.uid === id));
+    const stop = days[di].find((s) => s.uid === id);
+    assert.ok(['lunch', 'dinner'].includes(stop.meal), `${id} meal=${stop.meal}`);
+    t.days[di].stops = days[di];
+    const row = computeDay(t, di, seg).rows.find((r) => r.stop.uid === id);
+    const target = stop.meal === 'lunch' ? 12 * 60 : 18 * 60 + 30;
+    assert.ok(Math.abs(row.arrive - target) <= 90, `${id} ${fmtTime(row.arrive)}`);
+    assert.ok(row.arrive < 21 * 60, `${id} 숙소 복귀 시간 이후 배치`);
+  }
+  // 같은 날 같은 식사가 겹치지 않는다
+  const slots = days.flatMap((d, di) => d.filter((s) => s.meal).map((s) => `${di}:${s.meal}`));
+  assert.equal(new Set(slots).size, slots.length);
+});
+
+test('바·이자카야는 저녁, 영업 안 하는 시간대는 피한다', () => {
+  const t = trip();
+  const bar = { ...byId('f-goldengai'), types: ['bar'] };
+  const lunchOnly = { ...byId('f-tsukiji'), hours: { periods: [0, 1, 2, 3, 4, 5, 6].map((d) => ({ open: { day: d, hour: 5, minute: 0 }, close: { day: d, hour: 14, minute: 0 } })) } };
+  const days = autoDistribute(t, [byId('gyoen'), bar, lunchOnly]);
+  const find = (id) => days.flat().find((s) => s.uid === id);
+  assert.equal(find('f-goldengai').meal, 'dinner');
+  assert.equal(find('f-tsukiji').meal, 'lunch');
+});
+
+test('종류 정보가 부족해도 유형 이름으로 음식점·카페를 구분한다', () => {
+  assert.equal(classifyPlace(['point_of_interest', 'establishment'], '라멘 음식점'), 'food');
+  assert.equal(classifyPlace(['point_of_interest'], '카페'), 'cafe');
+  assert.equal(classifyPlace(['tourist_attraction'], '관광 명소'), 'sight');
+  assert.equal(classifyPlace(['ramen_restaurant', 'restaurant'], ''), 'food');
+});
+
+test('첫날 숙소 근처 식당은 숙소에 들러 짐을 푼 뒤로 배치한다', () => {
+  const t = withArrivalStop(trip({ arrival: { date: '2026-11-19', time: '11:00', airport: 'HND', mode: 'AUTO' } }));
+  const lunch = { ...byId('f-omoide'), meal: 'lunch', stay: 75 };
+  const out = arrangeStops(t, 0, [...t.days[0].stops, lunch]);
+  assert.equal(out[0].fixed, 'arrival');
+  assert.equal(out[1].uid, 'f-omoide');
+});

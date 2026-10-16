@@ -1,7 +1,7 @@
 // Google Maps Platform 연동: Maps JavaScript API + Places API(New) + Routes API.
 // 키는 config.js 또는 앱 설정에서 받는다. 브라우저에서 직접 호출하므로 키에 HTTP 리퍼러 제한을 꼭 건다.
 
-import { kindFromTypes } from '../planner.js';
+import { classifyPlace } from '../planner.js';
 
 const TOKYO = { lat: 35.6812, lng: 139.7671 };
 
@@ -71,7 +71,7 @@ function plainHours(h) {
 }
 
 export function normalizePlace(p) {
-  const types = p.types || [];
+  const types = [...new Set([p.primaryType, ...(p.types || [])].filter(Boolean))];
   let photo = null;
   let photoAttr = '';
   try {
@@ -86,7 +86,7 @@ export function normalizePlace(p) {
     lat: p.location.lat(),
     lng: p.location.lng(),
     types,
-    kind: kindFromTypes(types),
+    kind: classifyPlace(types, p.primaryTypeDisplayName || ''),
     typeLabel: p.primaryTypeDisplayName || null,
     address: p.formattedAddress || '',
     rating: p.rating ?? null,

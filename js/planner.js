@@ -41,6 +41,17 @@ export function kindFromTypes(types = []) {
   return 'sight';
 }
 
+// 장소 종류 정보가 부족할 때 Google의 유형 이름(예: '라멘 음식점')으로 보완한다
+export function classifyPlace(types = [], label = '', fallback = null) {
+  let kind = kindFromTypes(types);
+  if (kind === 'sight' && label) {
+    if (/카페|커피|디저트|베이커리|찻집|제과/.test(label)) kind = 'cafe';
+    else if (/음식|식당|레스토랑|라멘|라면|스시|초밥|이자카야|술집|주점|요리|덮밥|규동|야키|돈카츠|우동|소바|바$|펍/.test(label)) kind = 'food';
+  }
+  if (kind === 'sight' && fallback && fallback !== 'hotel') return fallback;
+  return kind;
+}
+
 // 장소 유형별 기본 체류시간(분). 4인 기준, 입장 대기·이동 동선 포함한 제안값이다.
 export function defaultStay(place) {
   const t = place.types || [];
@@ -164,7 +175,16 @@ export function computeDay(trip, di, seg) {
 
   day.stops.forEach((stop, index) => {
     const leg = prev ? seg(prev, stop, stop.mode, { di, t }) : null;
-    const arrive = t + (leg ? leg.min : 0);
+    let arrive = t + (leg ? leg.min : 0);
+    // 식사 장소에 오차범위보다 일찍 도착하면 목표 시각까지 기다린다(그 시간은 '비어 있음'으로 표시)
+    let wait = 0;
+    if (stop.meal && trip[stop.meal]) {
+      const T = toMin(trip[stop.meal]);
+      if (arrive < T - tol) {
+        wait = T - arrive;
+        arrive = T;
+      }
+    }
     const depart = arrive + stop.stay;
     totals.travel += leg ? leg.min : 0;
     if (stop.kind === 'food' || stop.kind === 'cafe') totals.meal += stop.stay;
@@ -179,7 +199,7 @@ export function computeDay(trip, di, seg) {
       if (Math.abs(d) > tol)
         warn = `${MEAL_LABEL[stop.meal]} 목표 ${trip[stop.meal]}보다 ${fmtDur(Math.abs(d))} ${d > 0 ? '늦어요' : '빨라요'} (오차범위 ${fmtDur(tol)})`;
     }
-    rows.push({ stop, index, num: stop.fixed ? null : ++num, leg, arrive, depart, warn, info });
+    rows.push({ stop, index, num: stop.fixed ? null : ++num, leg, arrive, depart, warn, info, wait });
     t = depart;
     prev = stop;
   });
@@ -331,15 +351,19 @@ export function optimizeOrder(stops, hotel, est) {
 export const CAFE_TIME = 15 * 60;
 const targetTime = (trip, s) => (s.meal ? toMin(trip[s.meal]) : CAFE_TIME);
 export function optimizeDay(trip, di) {
-  const day = trip.days[di];
+  return arrangeStops(trip, di, trip.days[di].stops);
+}
+
+// 주어진 장소들을 그날 동선으로 배치: 관광지는 이동 최소, 식사·카페는 목표 시각 근처
+export function arrangeStops(trip, di, list) {
   const est = estimator(trip);
   const timed = (s) => s.meal || s.kind === 'cafe';
-  const fixed = day.stops.filter((s) => s.fixed);
-  const meals = day.stops.filter((s) => !s.fixed && timed(s));
+  const fixed = list.filter((s) => s.fixed);
+  const meals = list.filter((s) => !s.fixed && timed(s));
   let stops = [
     ...fixed,
     ...optimizeOrder(
-      day.stops.filter((s) => !s.fixed && !timed(s)),
+      list.filter((s) => !s.fixed && !timed(s)),
       trip.hotel,
       est,
     ),
@@ -348,7 +372,10 @@ export function optimizeDay(trip, di) {
   for (const m of meals.sort((a, b) => targetTime(trip, a) - targetTime(trip, b))) {
     const target = targetTime(trip, m);
     let best = { i: stops.length, score: Infinity };
-    for (let i = m.meal ? 0 : fixed.length; i <= stops.length; i++) {
+    // 숙소 도착(짐 풀기) 전 식사는 공항 근처(3km 이내) 식당일 때만
+    const origin = dayOrigin(trip, di);
+    const beforeHotelOk = m.meal && origin?.kind === 'airport' && distKm(origin, m) <= 3;
+    for (let i = beforeHotelOk ? 0 : fixed.length; i <= stops.length; i++) {
       const trial = [...stops.slice(0, i), m, ...stops.slice(i)];
       const sim = computeDay({ ...trip, days: trip.days.map((d, k) => (k === di ? { ...d, stops: trial } : d)) }, di, segFn);
       const row = sim.rows.find((r) => r.stop === m);
@@ -409,10 +436,56 @@ function kmeans(points, k) {
   return centers.map((_, i) => points.filter((__, j) => assign[j] === i));
 }
 
+// 그날 들어갈 수 있는 식사 자리(켜진 식사 중 하루 가용 시간과 겹치는 것)
+export function mealSlots(trip, di) {
+  const w = dayWindow(trip, di);
+  const tol = trip.mealTolerance ?? 30;
+  return MEAL_TYPES.filter(([type]) => mealEnabled(trip, type))
+    .map(([type]) => [type, toMin(trip[type])])
+    .filter(([, T]) => T + tol >= w.start && T - tol <= w.rawEnd);
+}
+
+// 음식점 성격에 맞는 식사 순서: 바·이자카야는 저녁, 베이커리·브런치는 아침 우선
+function mealPreference(p) {
+  const t = p.types || [];
+  const label = p.typeLabel || '';
+  if (has(t, 'bar', 'pub', 'wine_bar', 'izakaya_restaurant', 'night_club') || /이자카야|술집|주점|바$|펍/.test(label)) return ['dinner', 'lunch'];
+  if (has(t, 'breakfast_restaurant', 'brunch_restaurant', 'bakery') || /브런치|베이커리|조식/.test(label)) return ['breakfast', 'lunch', 'dinner'];
+  return ['lunch', 'dinner', 'breakfast'];
+}
+
+// 메인 스팟 중 음식점을 식사 자리(날짜·아침/점심/저녁)에 배정한다
+function assignMeals(trip, foods, out) {
+  const taken = new Set();
+  const rest = [];
+  for (const f of foods) {
+    const pref = mealPreference(f);
+    let best = null;
+    out.forEach((list, di) => {
+      for (const [type, T] of mealSlots(trip, di)) {
+        const rank = pref.indexOf(type);
+        if (rank < 0 || taken.has(`${di}:${type}`)) continue;
+        if (hoursWarning(f, dayDate(trip, di), T, T + trip.mealMinutes)) continue; // 그 시간에 문을 닫으면 제외
+        const center = list.length ? centroid(list) : trip.hotel || f;
+        const score = distKm(center, f) + rank * 1.5;
+        if (!best || score < best.score) best = { di, type, score };
+      }
+    });
+    if (best) {
+      taken.add(`${best.di}:${best.type}`);
+      out[best.di].push({ ...f, meal: best.type, stay: Math.max(f.stay || 0, trip.mealMinutes) });
+    } else rest.push(f);
+  }
+  return rest; // 남는 식사 자리가 없으면 일반 장소로 배치
+}
+
 export function autoDistribute(trip, spots) {
   const n = trip.days.length;
   const out = Array.from({ length: n }, () => []);
   if (!spots.length) return out;
+  // 음식점은 관광지 묶음과 따로 식사 자리에 넣는다
+  const foods = spots.filter((s) => s.kind === 'food');
+  spots = spots.filter((s) => s.kind !== 'food');
   const est = estimator(trip);
   const caps = Array.from({ length: n }, (_, i) => dayCapacity(trip, i));
   const load = (list) => {
@@ -422,7 +495,7 @@ export function autoDistribute(trip, spots) {
   };
 
   const k = Math.min(n, spots.length);
-  const clusters = kmeans(spots, k).filter((c) => c.length);
+  const clusters = spots.length ? kmeans(spots, k).filter((c) => c.length) : [];
   // 스팟이 적어 한 곳씩 흩어진 경우: 3km 안의 묶음은 하루 용량이 허락하면 합친다
   const maxCap = Math.max(...caps);
   for (let merged = true; merged; ) {
@@ -463,5 +536,19 @@ export function autoDistribute(trip, spots) {
     out[move.to].push(move.p);
   }
 
-  return out.map((list) => optimizeOrder(list, trip.hotel, est));
+  // 관광지 배치가 끝난 뒤 음식점을 식사 자리에, 자리가 없으면 가까운 날에 일반 장소로
+  for (const f of assignMeals(trip, foods, out)) {
+    let bi = 0;
+    out.forEach((list, i) => {
+      const c = list.length ? centroid(list) : trip.hotel || f;
+      const cb = out[bi].length ? centroid(out[bi]) : trip.hotel || f;
+      if (distKm(c, f) < distKm(cb, f)) bi = i;
+    });
+    out[bi].push(f);
+  }
+  return out.map((list, di) => {
+    // 첫날 '숙소 도착' 자리가 있으면 포함해서 배치(공항→숙소 이후 시간 기준)
+    const fixed = di === 0 ? (trip.days[0]?.stops || []).filter((s) => s.fixed) : [];
+    return arrangeStops(trip, di, [...fixed, ...list]);
+  });
 }
