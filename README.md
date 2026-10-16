@@ -3,6 +3,8 @@
 숙소와 꼭 가고 싶은 메인 스팟만 넣으면 **이동 동선 → 가볼만한 곳 → 주변 맛집·카페** 순서로 일정을 채워 주는 모바일 우선 웹앱입니다.
 기본값은 4박 5일, 4명이며 설정에서 바꿀 수 있습니다.
 
+**바로 쓰기(휴대폰·PC):** https://contentsfit0914.github.io/Travelplan/
+
 - 장소 검색·추천·평점·사진·영업시간: Google **Places API (New)**
 - 이동 경로·소요시간·대중교통 노선: Google **Routes API**
 - 지도: Google **Maps JavaScript API** (키가 없으면 데모 모드로 OpenStreetMap 지도 사용)
