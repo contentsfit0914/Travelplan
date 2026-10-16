@@ -19,7 +19,7 @@ export class MapView {
     this.layers = [];
   }
 
-  async use(kind, { mapId } = {}) {
+  async use(kind, { mapId, tiles = true } = {}) {
     if (this.kind === kind && this.map) return;
     this.destroy();
     this.kind = kind;
@@ -38,11 +38,14 @@ export class MapView {
       });
     } else {
       this.map = window.L.map(this.el, { zoomControl: true }).setView([TOKYO.lat, TOKYO.lng], 12);
-      window.L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-        subdomains: 'abcd',
-        maxZoom: 19,
-      }).addTo(this.map);
+      this.el.classList.toggle('no-tiles', !tiles);
+      if (tiles) {
+        window.L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+          subdomains: 'abcd',
+          maxZoom: 19,
+        }).addTo(this.map);
+      }
     }
   }
 

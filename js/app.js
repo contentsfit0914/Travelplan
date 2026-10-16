@@ -159,11 +159,42 @@ function toast(msg, action) {
   toastTimer = setTimeout(() => (el.hidden = true), action ? 6000 : 3200);
 }
 
+// ---------------------------------------------------------------- 확인 창
+// 브라우저 기본 confirm() 대신 앱 안의 확인 창을 쓴다(모바일 일관성, 임베드 환경 호환)
+function ask(message, okLabel = '확인', danger = false) {
+  return new Promise((resolve) => {
+    const el = $('#dialog');
+    el.innerHTML = `<div class="dlg" role="alertdialog" aria-modal="true" aria-labelledby="dlgMsg">
+      <p id="dlgMsg">${esc(message)}</p>
+      <div class="dlg-actions">
+        <button class="btn" data-dlg="0">취소</button>
+        <button class="btn ${danger ? 'btn-danger-solid' : 'btn-primary'}" data-dlg="1">${esc(okLabel)}</button>
+      </div>
+    </div>`;
+    el.hidden = false;
+    const done = (v) => {
+      el.hidden = true;
+      el.innerHTML = '';
+      el.onclick = null;
+      document.removeEventListener('keydown', onKey);
+      resolve(v);
+    };
+    const onKey = (e) => e.key === 'Escape' && done(false);
+    document.addEventListener('keydown', onKey);
+    el.onclick = (e) => {
+      const b = e.target.closest('[data-dlg]');
+      if (b) done(b.dataset.dlg === '1');
+      else if (e.target === el) done(false);
+    };
+    el.querySelector('[data-dlg="1"]').focus();
+  });
+}
+
 // ---------------------------------------------------------------- 공급자 연결
 async function connect() {
   const key = CFG.googleMapsApiKey || S.settings.apiKey;
   S.providerError = '';
-  if (key && !S.settings.preferDemo) {
+  if (key && !S.settings.preferDemo && !CFG.preview) {
     S.connecting = true;
     render();
     try {
@@ -182,7 +213,7 @@ async function connect() {
 }
 
 async function useDemo() {
-  await mapView.use('leaflet');
+  await mapView.use('leaflet', { tiles: !CFG.preview });
   setProvider(createDemoProvider());
 }
 
@@ -202,7 +233,7 @@ function render(opts = {}) {
   renderSheet();
   $('.app').classList.toggle('map-big', S.ui.mapBig);
   $('#modeBadge').innerHTML = isDemo()
-    ? `<button data-action="open-settings" class="badge-demo">데모 모드</button>`
+    ? `<button data-action="open-settings" class="badge-demo">${CFG.preview ? '미리보기' : '데모 모드'}</button>`
     : `<span class="badge-live">Google 지도</span>`;
   renderMap(opts);
 }
@@ -211,6 +242,8 @@ function providerBanner() {
   if (S.connecting) return `<div class="banner">Google 지도에 연결하는 중…</div>`;
   if (S.providerError)
     return `<div class="banner banner-err"><b>Google 지도 연결 실패</b><br>${esc(S.providerError)}<br><button class="link" data-action="open-settings">API 키 확인하기</button></div>`;
+  if (CFG.preview)
+    return `<div class="banner"><b>미리보기</b> · 샘플 장소와 추정 이동시간으로 동작하고 지도 배경은 표시되지 않아요. 실제 Google 장소·평점·경로는 내 PC나 팀 사이트에서 실행해 API 키를 연결하면 쓸 수 있어요.</div>`;
   if (isDemo())
     return `<div class="banner"><b>데모 모드</b> · 샘플 장소와 추정 이동시간으로 동작해요. 실제 Google 장소·평점·경로는 <button class="link" data-action="open-settings">API 키 연결</button> 후 사용할 수 있어요.</div>`;
   return `<div class="banner banner-ok">Google 지도 연결됨 · 장소·평점·영업시간·경로를 실시간으로 불러와요.</div>`;
@@ -768,6 +801,7 @@ function stopSheetHTML(sh) {
 }
 
 function keySectionHTML() {
+  if (CFG.preview) return `<p class="hint">미리보기 페이지에서는 Google 지도를 연결할 수 없어요. API 키는 내 PC(localhost)나 팀 사이트에서만 입력하세요.</p>`;
   if (CFG.googleMapsApiKey)
     return `<div class="card key-card"><b>배포 설정의 키 사용 중</b><div class="muted small">config.js(배포 시 GitHub Secret으로 주입)에 등록된 키예요.</div></div>`;
   const k = S.settings.apiKey;
@@ -817,7 +851,7 @@ function settingsHTML() {
     <div class="section-title">공유·백업</div>
     <div class="row-actions">
       <button class="btn" data-action="share">텍스트로 공유</button>
-      <button class="btn" data-action="export">파일 내보내기</button>
+      ${CFG.preview ? '' : `<button class="btn" data-action="export">파일 내보내기</button>`}
       <label class="btn">파일 불러오기<input type="file" accept="application/json,.json" data-import hidden></label>
     </div>
     <p class="hint">일행에게 파일을 보내면 각자 휴대폰에서 같은 일정을 불러올 수 있어요.</p>
@@ -1217,7 +1251,7 @@ function itineraryText() {
 async function share() {
   const text = itineraryText();
   try {
-    if (navigator.share) {
+    if (navigator.share && !CFG.preview) {
       await navigator.share({ title: '도쿄 여행 일정', text });
       return;
     }
@@ -1482,7 +1516,7 @@ const actions = {
     renderSheet();
   },
   'delete-key': async () => {
-    if (!confirm('저장된 API 키를 이 기기에서 삭제할까요?')) return;
+    if (!(await ask('저장된 API 키를 이 기기에서 삭제할까요?', '키 삭제', true))) return;
     S.settings = { ...S.settings, apiKey: '' };
     saveSettings(S.settings);
     S.ui.editKey = false;
@@ -1510,8 +1544,8 @@ const actions = {
     await useDemo();
     render({ fit: true });
   },
-  rebuild: () => {
-    if (!confirm('지금 일정(추가한 맛집·카페 포함)을 지우고 메인 스팟 기준으로 다시 나눌까요?')) return;
+  rebuild: async () => {
+    if (!(await ask('지금 일정(추가한 맛집·카페 포함)을 지우고 메인 스팟 기준으로 다시 나눌까요?', '다시 배분', true))) return;
     build();
   },
   share,
@@ -1521,8 +1555,8 @@ const actions = {
     render();
     toast('경로 캐시를 비웠어요');
   },
-  reset: () => {
-    if (!confirm('모든 일정과 설정을 지울까요? (API 키는 유지돼요)')) return;
+  reset: async () => {
+    if (!(await ask('모든 일정을 지우고 처음부터 다시 만들까요? (API 키는 유지돼요)', '전체 초기화', true))) return;
     S.trip = ensureDays(defaultTrip());
     save();
     S.ui = { ...S.ui, screen: 'setup', step: 1, day: 0, sheet: null, focus: null, search: { q: '', results: [], loading: false, error: '' } };
@@ -1590,6 +1624,7 @@ function mount() {
       <aside id="sheet" class="sheet" aria-live="polite"></aside>
     </div>
     <div id="toast" class="toast" role="status" hidden></div>
+    <div id="dialog" class="dlg-backdrop" hidden></div>
   </div>`;
   mapView = new MapView(document.getElementById('map'));
   document.addEventListener('click', onClick);
