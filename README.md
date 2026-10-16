@@ -41,16 +41,23 @@
 - 공유: 텍스트 일정 공유(휴대폰 공유 시트), JSON 파일 내보내기·불러오기로 일행과 같은 일정을 나눠 씁니다.
 - 데이터는 브라우저(localStorage)에만 저장됩니다. 서버가 없습니다.
 
-## 실행
+## 내 PC에서 실행하기
 
-빌드 과정이 없는 정적 웹앱입니다.
+필요한 것은 **Node.js** 하나입니다. 다른 설치나 명령어는 필요 없습니다.
 
-```bash
-npm start        # http://localhost:5173 (npx serve)
-npm test         # 일정 엔진 단위 테스트
-```
+1. **Node.js 설치**(처음 한 번): https://nodejs.org 에서 **LTS** 버전을 받아 기본 설정으로 설치합니다.
+2. **앱 내려받기**: GitHub 저장소에서 `claude/tokyo-travel-planner` 브랜치를 고르고 **Code → Download ZIP**을 누른 뒤 압축을 풉니다.
+3. **실행**
+   - 윈도우: `start-windows.bat` 더블클릭
+   - 맥: `start-mac.command`를 **우클릭 → 열기** (처음 한 번은 '확인되지 않은 개발자' 경고가 나오면 '열기')
+4. 브라우저에 `http://localhost:5173`이 자동으로 열립니다. 검은 실행 창을 닫으면 앱이 종료됩니다.
+5. 앱의 ⚙ 설정에서 Google API 키를 넣습니다. 키의 웹사이트 제한에 `http://localhost:5173/*`가 있어야 합니다.
 
-`index.html`을 파일로 직접 열면 ES 모듈이 막히므로 꼭 로컬 서버로 엽니다.
+- 실행 서버는 이 PC에서만 접속되도록 열립니다(같은 와이파이의 다른 기기에서는 접속 불가). 앱 파일 외의 파일은 열리지 않습니다.
+- 일정과 키는 사용한 브라우저에 저장됩니다. 크롬에서 만든 일정은 크롬에서 열어야 보입니다.
+- `5173번 포트를 이미 다른 프로그램이 쓰고 있어요`가 뜨면 이미 열린 실행 창을 닫고 다시 실행하세요.
+
+개발자용: `npm start`(= `node server.mjs`), `npm test`.
 
 ## Google Maps Platform 설정
 
@@ -114,6 +121,8 @@ npm test         # 일정 엔진 단위 테스트
 
 ```
 index.html              진입점
+server.mjs              내 PC 전용 실행 서버(127.0.0.1, 앱 파일만 제공)
+start-windows.bat / start-mac.command  더블클릭 실행 파일
 config.js               배포용 설정(API 키, 지도 ID)
 css/app.css             스타일(모바일 우선, 900px 이상 2단)
 js/app.js               화면·사용자 동작
