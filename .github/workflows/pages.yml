@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
       # 선택: Secret을 등록하면 팀원 모두가 키 입력 없이 쓴다(대신 키가 공개 사이트의 config.js에 들어감).
       # 등록하지 않으면 각자 앱 설정에서 키를 입력하고, 키는 그 브라우저에만 저장된다.
-      - name: API 키 주입 (선택 — Secrets: GOOGLE_MAPS_API_KEY, Variables: GOOGLE_MAP_ID)
+      - name: "API 키 주입 (선택: Secret GOOGLE_MAPS_API_KEY, Variable GOOGLE_MAP_ID)"
         env:
           KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           MAP_ID: ${{ vars.GOOGLE_MAP_ID }}
