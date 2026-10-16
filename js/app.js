@@ -580,12 +580,7 @@ function planHTML() {
       ? ''
       : S.ui.edit && t.days[di].stops.some((x) => !x.fixed)
         ? `<footer class="action-bar"><button class="btn btn-primary" data-action="edit-order">✓ 편집 완료</button></footer>`
-        : `<footer class="action-bar rec-bar">
-    <button class="btn" data-action="open-rec" data-tab="sight">🏛 가볼만한 곳</button>
-    <button class="btn" data-action="open-rec" data-tab="food">🍜 맛집</button>
-    <button class="btn" data-action="open-rec" data-tab="cafe">☕ 카페</button>
-    <button class="btn icon-only" data-action="open-rec" data-tab="search" aria-label="장소 검색">🔍</button>
-  </footer>`
+        : ''
   }`;
 }
 

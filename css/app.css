@@ -203,7 +203,6 @@ h1 { font-size: 20px; margin: 0; letter-spacing: -0.02em; }
 }
 .action-bar .btn { flex: 1; }
 .action-bar > span { flex: 1; }
-.rec-bar .btn { padding: 0 6px; font-size: 13.5px; }
 
 /* ---------- 일자 요약 */
 .summary { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; border-top: 4px solid var(--c); }
