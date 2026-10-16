@@ -2,7 +2,6 @@ name: Test & Deploy (GitHub Pages)
 
 on:
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -26,8 +25,9 @@ jobs:
       - run: npm test
 
   deploy:
-    # 저장소 Settings → Pages → Source 를 "GitHub Actions"로 켠 뒤에만 배포한다
-    if: github.event_name != 'pull_request' && vars.PAGES_ENABLED == 'true'
+    # 기본 브랜치만 배포한다(github-pages 환경의 기본 배포 허용 브랜치와 일치).
+    # 저장소 Settings → Pages → Source 를 "GitHub Actions"로 켜야 성공한다.
+    if: github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
     needs: test
     runs-on: ubuntu-latest
     environment:
@@ -35,7 +35,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: API 키 주입 (Secrets: GOOGLE_MAPS_API_KEY, Variables: GOOGLE_MAP_ID)
+      # 선택: Secret을 등록하면 팀원 모두가 키 입력 없이 쓴다(대신 키가 공개 사이트의 config.js에 들어감).
+      # 등록하지 않으면 각자 앱 설정에서 키를 입력하고, 키는 그 브라우저에만 저장된다.
+      - name: API 키 주입 (선택 — Secrets: GOOGLE_MAPS_API_KEY, Variables: GOOGLE_MAP_ID)
         env:
           KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           MAP_ID: ${{ vars.GOOGLE_MAP_ID }}

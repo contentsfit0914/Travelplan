@@ -107,15 +107,16 @@
 - 추정 이동시간은 직선거리 × 1.3에 도보 4.5km/h, 택시 18km/h(+4분), 대중교통 22km/h(+역 이동·대기 12분)를 가정한 근사치입니다.
 - 데모 모드의 장소는 체험용 샘플(좌표 근사치)이며 평점·영업시간이 없습니다.
 
-## GitHub Pages로 팀 공유하기
+## GitHub Pages로 휴대폰에서 쓰기
 
-`.github/workflows/pages.yml`이 `main` 브랜치 푸시 때 테스트를 돌리고 Pages에 배포합니다.
+`.github/workflows/pages.yml`이 기본 브랜치에 푸시될 때 테스트를 돌리고 Pages에 배포합니다. 배포 주소는 `https://contentsfit0914.github.io/Travelplan/`입니다.
 
-1. 저장소 **Settings → Pages → Source**를 `GitHub Actions`로 설정합니다. (비공개 저장소의 Pages는 유료 플랜이 필요할 수 있습니다.)
-2. **Settings → Secrets and variables → Actions**
-   - Variables: `PAGES_ENABLED` = `true` (배포 활성화), 필요 시 `GOOGLE_MAP_ID`
-   - Secrets: `GOOGLE_MAPS_API_KEY`
-3. API 키의 웹사이트 제한에 `https://<계정>.github.io/*`를 추가합니다. 배포된 `config.js`에는 키가 들어가므로 웹사이트·API 제한이 유일한 보호 수단입니다.
+1. 저장소를 공개로 전환합니다(무료 플랜의 Pages는 공개 저장소만 지원). Settings → General → 맨 아래 Danger Zone → Change visibility
+2. Settings → Pages → Build and deployment → Source를 `GitHub Actions`로 설정합니다.
+3. Google Cloud 키의 웹사이트 제한에 `https://contentsfit0914.github.io/*`를 추가합니다.
+4. 배포 주소를 휴대폰에서 열고 ⚙ 설정에서 키를 입력합니다. 키는 그 휴대폰 브라우저에만 저장됩니다.
+
+선택: 팀원이 키 입력 없이 쓰게 하려면 Secrets에 `GOOGLE_MAPS_API_KEY`를 등록합니다. 이 경우 키가 공개 사이트의 `config.js`에 들어가므로 웹사이트·API 제한이 유일한 보호 수단입니다.
 
 ## 폴더 구조
 
