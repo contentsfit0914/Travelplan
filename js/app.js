@@ -1441,11 +1441,16 @@ function closeDetail() {
 
 const stars = (n) => (n == null ? '' : `<span class="rating">★ ${Number(n).toFixed(1)}</span>`);
 
+// 일본 장소의 Google AI 요약은 일본어·영어로만 오는 경우가 많다 → Google 번역으로 한국어 보기
+const isKorean = (a) => (a.lang || '').startsWith('ko') || /[가-힣]/.test(a.text);
+const translateUrl = (text) => `https://translate.google.com/?sl=auto&tl=ko&op=translate&text=${encodeURIComponent(text.slice(0, 1800))}`;
+
 function aiBlock(title, a) {
   return `<div class="ai-card">
     <div class="ai-title">✨ ${title}</div>
     <p>${esc(a.text)}</p>
-    <div class="ai-foot">${esc(a.disclosure || 'Gemini로 요약됨')}${a.lang && a.lang.startsWith('ja') ? ' · 일본어 원문' : ''}${safeUrl(a.flag) ? ` · <a href="${esc(safeUrl(a.flag))}" target="_blank" rel="noopener">부적절한 내용 신고</a>` : ''}</div>
+    ${isKorean(a) ? '' : `<a class="btn btn-sm ai-tr" href="${esc(translateUrl(a.text))}" target="_blank" rel="noopener">🇰🇷 한국어로 번역 ↗</a>`}
+    <div class="ai-foot">${esc(a.disclosure || 'Gemini로 요약됨')}${a.lang && a.lang.startsWith('ja') ? ' · 일본어 원문' : a.lang && a.lang.startsWith('en') ? ' · 영어 원문' : ''}${safeUrl(a.flag) ? ` · <a href="${esc(safeUrl(a.flag))}" target="_blank" rel="noopener">부적절한 내용 신고</a>` : ''}</div>
   </div>`;
 }
 
