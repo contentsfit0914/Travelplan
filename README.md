@@ -59,15 +59,34 @@ npm test         # 일정 엔진 단위 테스트
    - Maps JavaScript API
    - Places API (New)
    - Routes API
-3. **사용자 인증 정보 → API 키 만들기** 후 반드시 제한을 겁니다.
-   - 애플리케이션 제한: 웹사이트(HTTP 리퍼러) → 배포 주소(예: `https://<계정>.github.io/*`), 개발용 `http://localhost:5173/*`
-   - API 제한: 위 3개 API만 허용
+3. **사용자 인증 정보 → API 키 만들기** 후 반드시 제한을 겁니다. (아래 '보안' 참고)
 4. 키 넣는 방법(둘 중 하나)
    - 개인 사용: 앱 ⚙ 설정 → API 키 입력 → `저장하고 연결` (해당 브라우저에만 저장)
-   - 팀 배포: `config.js`의 `googleMapsApiKey`에 입력하거나, 아래 GitHub Pages 배포 시 Secret으로 주입
+   - 팀 배포: 아래 GitHub Pages 배포 시 Secret `GOOGLE_MAPS_API_KEY`로 주입. `config.js`에 직접 적어 커밋하지 마세요.
 5. (선택) 운영용 지도 ID: 콘솔 **지도 관리**에서 JavaScript용 Map ID를 만들어 `config.js`의 `mapId`에 넣습니다. 비워 두면 Google 테스트용 `DEMO_MAP_ID`를 씁니다.
 
 키가 틀리거나 API가 꺼져 있으면 앱이 데모 모드로 바뀌고 화면에 원인을 표시합니다.
+
+### 보안
+
+브라우저에서 Google 지도를 부르는 키는 구조상 페이지 요청 주소에 실려 보입니다. 숨길 수 없으므로 **키가 노출돼도 다른 곳에서 못 쓰게 제한하는 것**이 핵심입니다.
+
+| 항목 | 설정 |
+| --- | --- |
+| 애플리케이션 제한 | 웹사이트(HTTP 리퍼러): `http://localhost:5173/*`, 배포 시 `https://<계정>.github.io/*` |
+| API 제한 | Maps JavaScript API, Places API (New), Routes API 3개만 |
+| 할당량 | API별 일일 요청 한도를 낮게 시작(콘솔 → 할당량) |
+| 예산 알림 | 결제 → 예산 및 알림에서 월 예산·알림 메일 설정 |
+
+앱이 하는 보호 조치
+
+- 키는 해당 브라우저에만 저장합니다. '이 기기에 기억하기'를 끄면 sessionStorage에만 두어 탭을 닫을 때 지워집니다.
+- 설정 화면에는 `AIza••••abcd`처럼 가려서 보여 주고, 키 삭제 버튼을 제공합니다.
+- 키는 Google 지도 요청에만 쓰고, 일정 내보내기 파일에는 넣지 않습니다.
+- 공유받은 일정 파일은 외부 입력으로 보고 모든 값을 형식·허용 목록으로 다시 정리합니다(`javascript:` 링크, HTML 삽입 차단).
+- `npm test`가 저장소에 키 형태의 문자열이 커밋되면 실패합니다(CI에서도 실행).
+
+키를 채팅·메신저·스크린샷으로 공유하지 마세요. 노출이 의심되면 콘솔에서 키를 **다시 생성**하거나 삭제하면 기존 키는 바로 무효가 됩니다.
 
 ### 비용 관련 메모
 
@@ -89,7 +108,7 @@ npm test         # 일정 엔진 단위 테스트
 2. **Settings → Secrets and variables → Actions**
    - Variables: `PAGES_ENABLED` = `true` (배포 활성화), 필요 시 `GOOGLE_MAP_ID`
    - Secrets: `GOOGLE_MAPS_API_KEY`
-3. API 키의 리퍼러 제한에 Pages 주소를 추가합니다. 브라우저에서 쓰는 키는 페이지 소스에서 보이므로 리퍼러·API 제한이 유일한 보호 수단입니다.
+3. API 키의 웹사이트 제한에 `https://<계정>.github.io/*`를 추가합니다. 배포된 `config.js`에는 키가 들어가므로 웹사이트·API 제한이 유일한 보호 수단입니다.
 
 ## 폴더 구조
 
@@ -106,5 +125,5 @@ js/providers/google.js  Places API (New)·Routes API 연동
 js/providers/demo.js    데모 데이터 공급자
 js/data/demo-places.js  데모 샘플 장소
 vendor/leaflet/         Leaflet 1.9.4 (BSD-2-Clause)
-tests/                  일정 엔진 단위 테스트(node --test)
+tests/                  일정 엔진·보안 테스트(node --test)
 ```

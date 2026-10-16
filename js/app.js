@@ -20,7 +20,19 @@ import {
   MEAL_LABEL,
 } from './planner.js';
 import { MODES, distKm, fmtKm, centroid } from './geo.js';
-import { loadTrip, saveTrip, loadSettings, saveSettings, ensureDays, emptyDay, defaultTrip, validateImported } from './store.js';
+import {
+  loadTrip,
+  saveTrip,
+  loadSettings,
+  saveSettings,
+  ensureDays,
+  emptyDay,
+  defaultTrip,
+  validateImported,
+  safeUrl,
+  isLikelyApiKey,
+  maskKey,
+} from './store.js';
 import { RouteCache } from './routes.js';
 import { MapView } from './mapview.js';
 import { createDemoProvider } from './providers/demo.js';
@@ -82,6 +94,8 @@ const allStops = () => S.trip.days.flatMap((d, di) => d.stops.map((s, i) => ({ s
 const findStop = (u) => allStops().find((x) => x.s.uid === u);
 const placeDay = (id) => allStops().find((x) => x.s.id === id)?.di;
 const save = () => saveTrip(S.trip);
+const photoOf = (p) => safeUrl(p.photo, { image: true });
+const cssColor = (c) => (/^#[0-9a-f]{3,8}$/i.test(c || '') ? c : null);
 const candDomId = (id) => `cand-${String(id).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 
 function makeStop(p, extra = {}) {
@@ -116,7 +130,8 @@ function dirUrl(a, b, mode) {
 }
 
 function placeUrl(p) {
-  if (p.mapsUrl) return p.mapsUrl;
+  const u = safeUrl(p.mapsUrl);
+  if (u) return u;
   const q = new URLSearchParams({ api: '1', query: `${p.lat},${p.lng}` });
   if (p.id && !p.demo) q.set('query_place_id', p.id);
   return `https://www.google.com/maps/search/?${q}`;
@@ -455,7 +470,7 @@ function modeLabel(leg, pref) {
 function legHTML(leg, from, to, ref, pref, di) {
   if (!leg) return '';
   const lines = (leg.lines || [])
-    .map((l) => `<span class="line-chip" style="${l.color ? `--lc:${l.color}` : ''}" title="${esc(l.from)} → ${esc(l.to)} (${l.stops}정거장)">${esc(l.name)}</span>`)
+    .map((l) => `<span class="line-chip" style="${cssColor(l.color) ? `--lc:${cssColor(l.color)}` : ''}" title="${esc(l.from)} → ${esc(l.to)} (${l.stops}정거장)">${esc(l.name)}</span>`)
     .join('');
   const tag = leg.pending ? '<span class="spinner sm" title="경로 계산 중"></span>' : leg.estimated && isDemo() ? '<span class="tag">추정</span>' : leg.failed ? '<span class="tag tag-warn" title="Google 경로를 찾지 못해 직선거리로 추정했어요">추정</span>' : '';
   return `<div class="leg" style="--c:${color(di)}">
@@ -495,18 +510,18 @@ function freeHTML(from, to, anchor) {
 function stopHTML(row, di) {
   const s = row.stop;
   const active = S.ui.focus === s.uid ? 'is-active' : '';
-  return `<div class="stop ${active}" style="--c:${color(di)}" data-uid="${s.uid}">
+  return `<div class="stop ${active}" style="--c:${color(di)}" data-uid="${esc(s.uid)}">
     <div class="stop-time"><b>${fmtTime(row.arrive)}</b><small>~${fmtTime(row.depart)}</small></div>
     <div class="stop-num">${row.index + 1}</div>
-    <button class="stop-body" data-action="open-stop" data-uid="${s.uid}">
+    <button class="stop-body" data-action="open-stop" data-uid="${esc(s.uid)}">
       <span class="stop-name">${KIND[s.kind]?.icon || '📍'} ${esc(s.name)}</span>
       <span class="stop-meta">${s.must ? '<em class="badge">메인</em>' : ''}${s.meal ? `<em class="badge meal">${MEAL_LABEL[s.meal]}</em>` : ''}${ratingHTML(s)} ${placeMeta(s)}</span>
       ${row.warn ? `<span class="warn">⚠ ${esc(row.warn)}</span>` : ''}
     </button>
     <div class="stay">
-      <button data-action="stay" data-uid="${s.uid}" data-d="-15" aria-label="체류시간 줄이기">−</button>
+      <button data-action="stay" data-uid="${esc(s.uid)}" data-d="-15" aria-label="체류시간 줄이기">−</button>
       <span>${fmtDur(s.stay)}</span>
-      <button data-action="stay" data-uid="${s.uid}" data-d="15" aria-label="체류시간 늘리기">＋</button>
+      <button data-action="stay" data-uid="${esc(s.uid)}" data-d="15" aria-label="체류시간 늘리기">＋</button>
     </div>
   </div>`;
 }
@@ -675,7 +690,7 @@ function recItemHTML(p, sh) {
   const focus = S.ui.focus === `cand:${p.id}`;
   const detour = p.extra <= 2 ? '동선에서 거의 안 벗어나요' : `이동 +${p.extra}분`;
   return `<li class="rec ${focus ? 'is-active' : ''}" id="${candDomId(p.id)}">
-    ${p.photo ? `<div class="thumb"><img src="${esc(p.photo)}" alt="" loading="lazy">${p.photoAttr ? `<small>${esc(p.photoAttr)}</small>` : ''}</div>` : `<div class="thumb ph">${KIND[p.kind]?.icon || '📍'}</div>`}
+    ${photoOf(p) ? `<div class="thumb"><img src="${esc(photoOf(p))}" alt="" loading="lazy">${p.photoAttr ? `<small>${esc(p.photoAttr)}</small>` : ''}</div>` : `<div class="thumb ph">${KIND[p.kind]?.icon || '📍'}</div>`}
     <button class="rec-main" data-action="focus-cand" data-id="${esc(p.id)}">
       <span class="r-name">${esc(p.name)}</span>
       <span class="r-meta">${ratingHTML(p)} ${placeMeta(p)}</span>
@@ -708,18 +723,18 @@ function stopSheetHTML(sh) {
     <button class="icon-btn" data-action="close-sheet" aria-label="닫기">${ICON.close}</button>
   </div>
   <div class="sheet-body">
-    ${s.photo ? `<div class="hero"><img src="${esc(s.photo)}" alt="">${s.photoAttr ? `<small>${esc(s.photoAttr)}</small>` : ''}</div>` : ''}
+    ${photoOf(s) ? `<div class="hero"><img src="${esc(photoOf(s))}" alt="">${s.photoAttr ? `<small>${esc(s.photoAttr)}</small>` : ''}</div>` : ''}
     <div class="r-meta">${ratingHTML(s)} ${placeMeta(s)}</div>
     <div class="muted small">${esc(s.address)}</div>
     ${s.note ? `<p class="note">${esc(s.note)}</p>` : ''}
     ${hoursToday ? `<p class="small"><b>이 날 영업시간</b> · ${esc(hoursToday)}</p>` : s.demo ? '<p class="small muted">데모 장소라 영업시간 정보가 없어요. Google 지도에서 확인해 주세요.</p>' : ''}
     <div class="field"><label>머무는 시간</label>
       <div class="stay big">
-        <button data-action="stay" data-uid="${s.uid}" data-d="-15">−15분</button><span>${fmtDur(s.stay)}</span><button data-action="stay" data-uid="${s.uid}" data-d="15">+15분</button>
+        <button data-action="stay" data-uid="${esc(s.uid)}" data-d="-15">−15분</button><span>${fmtDur(s.stay)}</span><button data-action="stay" data-uid="${esc(s.uid)}" data-d="15">+15분</button>
       </div>
     </div>
     <div class="field"><label>여기까지 이동수단</label>
-      <div class="seg">${modes.map(([m, l]) => `<button class="${s.mode === m ? 'on' : ''}" data-action="stop-mode" data-uid="${s.uid}" data-v="${m}">${l}</button>`).join('')}</div>
+      <div class="seg">${modes.map(([m, l]) => `<button class="${s.mode === m ? 'on' : ''}" data-action="stop-mode" data-uid="${esc(s.uid)}" data-v="${m}">${l}</button>`).join('')}</div>
     </div>
     ${
       s.kind === 'food' || s.kind === 'cafe'
@@ -728,19 +743,19 @@ function stopSheetHTML(sh) {
             ['lunch', '점심'],
             ['dinner', '저녁'],
           ]
-            .map(([m, l]) => `<button class="${(s.meal || '') === m ? 'on' : ''}" data-action="stop-meal" data-uid="${s.uid}" data-v="${m}">${l}</button>`)
+            .map(([m, l]) => `<button class="${(s.meal || '') === m ? 'on' : ''}" data-action="stop-meal" data-uid="${esc(s.uid)}" data-v="${m}">${l}</button>`)
             .join('')}</div></div>`
         : ''
     }
     <div class="field"><label>순서</label>
       <div class="seg">
-        <button data-action="move" data-uid="${s.uid}" data-d="-1" ${i === 0 ? 'disabled' : ''}>▲ 앞으로</button>
-        <button data-action="move" data-uid="${s.uid}" data-d="1" ${i === day.stops.length - 1 ? 'disabled' : ''}>▼ 뒤로</button>
+        <button data-action="move" data-uid="${esc(s.uid)}" data-d="-1" ${i === 0 ? 'disabled' : ''}>▲ 앞으로</button>
+        <button data-action="move" data-uid="${esc(s.uid)}" data-d="1" ${i === day.stops.length - 1 ? 'disabled' : ''}>▼ 뒤로</button>
       </div>
     </div>
     <div class="field"><label>다른 날로 옮기기</label>
       <div class="chips">${t.days
-        .map((_, k) => `<button class="chip ${k === di ? 'on' : ''}" style="--c:${color(k)}" data-action="move-day" data-uid="${s.uid}" data-day="${k}" ${k === di ? 'disabled' : ''}>D${k + 1} ${dayLabel(t, k)}</button>`)
+        .map((_, k) => `<button class="chip ${k === di ? 'on' : ''}" style="--c:${color(k)}" data-action="move-day" data-uid="${esc(s.uid)}" data-day="${k}" ${k === di ? 'disabled' : ''}>D${k + 1} ${dayLabel(t, k)}</button>`)
         .join('')}</div>
     </div>
     <div class="row-actions">
@@ -748,26 +763,46 @@ function stopSheetHTML(sh) {
       <button class="btn" data-action="open-rec" data-tab="cafe" data-anchor="${s.uid}">☕ 근처 카페</button>
       <a class="btn" href="${esc(placeUrl(s))}" target="_blank" rel="noopener">Google 지도 ↗</a>
     </div>
-    <button class="btn btn-danger wide" data-action="remove-stop" data-uid="${s.uid}">일정에서 삭제</button>
+    <button class="btn btn-danger wide" data-action="remove-stop" data-uid="${esc(s.uid)}">일정에서 삭제</button>
   </div>`;
 }
 
+function keySectionHTML() {
+  if (CFG.googleMapsApiKey)
+    return `<div class="card key-card"><b>배포 설정의 키 사용 중</b><div class="muted small">config.js(배포 시 GitHub Secret으로 주입)에 등록된 키예요.</div></div>`;
+  const k = S.settings.apiKey;
+  if (k && !S.ui.editKey)
+    return `<div class="card key-card">
+      <div><b>저장된 키</b> <code>${esc(maskKey(k))}</code></div>
+      <div class="muted small">${S.settings.rememberKey ? '이 기기 브라우저에 저장됨' : '이 탭을 닫으면 지워짐'}</div>
+      <div class="row-actions">
+        <button class="btn btn-sm" data-action="edit-key">키 바꾸기</button>
+        <button class="btn btn-sm btn-danger" data-action="delete-key">키 삭제</button>
+      </div>
+    </div>`;
+  return `<div class="field"><label for="apiKeyInput">Google Maps Platform API 키</label>
+      <input id="apiKeyInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="text" data-key-input placeholder="AIza로 시작하는 39자">
+      <label class="check"><input type="checkbox" data-key-remember ${S.settings.rememberKey !== false ? 'checked' : ''}> 이 기기에 기억하기 <span class="muted">(끄면 탭을 닫을 때 삭제)</span></label>
+    </div>
+    <div class="row-actions">
+      <button class="btn btn-primary" data-action="save-key">저장하고 연결</button>
+      ${k ? `<button class="btn" data-action="cancel-key">취소</button>` : ''}
+    </div>`;
+}
+
 function settingsHTML() {
-  const fromConfig = !!CFG.googleMapsApiKey;
   return `
   <div class="sheet-head"><b>설정</b><button class="icon-btn" data-action="close-sheet" aria-label="닫기">${ICON.close}</button></div>
   <div class="sheet-body">
     <div class="section-title">Google 지도 연결</div>
     ${providerBanner()}
-    ${
-      fromConfig
-        ? `<p class="hint">config.js에 등록된 API 키를 쓰고 있어요.</p>`
-        : `<div class="field"><label>Google Maps Platform API 키</label>
-      <input type="password" autocomplete="off" data-key-input placeholder="AIza…" value="${esc(S.settings.apiKey)}">
-      <p class="hint">Maps JavaScript API · Places API (New) · Routes API를 켠 키가 필요해요. 키는 이 브라우저에만 저장돼요.</p></div>`
-    }
+    ${keySectionHTML()}
+    <ul class="sec-notes">
+      <li>키는 이 브라우저에만 저장되고, Google 지도 요청 외에는 어디로도 보내지 않아요. 일정 내보내기 파일에도 들어가지 않아요.</li>
+      <li>브라우저에서 쓰는 키는 구조상 노출될 수 있어요. Google Cloud에서 <b>웹사이트 제한</b>과 <b>API 제한</b>을 꼭 걸어 주세요.</li>
+      <li>공용 PC에서는 '이 기기에 기억하기'를 끄세요.</li>
+    </ul>
     <div class="row-actions">
-      ${fromConfig ? '' : `<button class="btn btn-primary" data-action="save-key">저장하고 연결</button>`}
       ${isDemo() ? (CFG.googleMapsApiKey || S.settings.apiKey ? `<button class="btn" data-action="use-google">Google 모드로</button>` : '') : `<button class="btn" data-action="use-demo">데모 모드로</button>`}
     </div>
 
@@ -1414,24 +1449,52 @@ const actions = {
     render();
   },
   'open-settings': () => {
+    S.ui.editKey = false;
     S.ui.sheet = { type: 'settings', resetScroll: true };
     render();
   },
   'save-key': async () => {
-    const v = ($('[data-key-input]')?.value || '').trim();
+    const input = $('[data-key-input]');
+    const v = (input?.value || '').trim();
+    if (input) input.value = '';
     if (!v) return toast('API 키를 입력해 주세요');
-    const changed = v !== S.settings.apiKey;
-    S.settings.apiKey = v;
-    S.settings.preferDemo = false;
+    if (!isLikelyApiKey(v)) return toast('키 형식이 맞지 않아요. AIza로 시작하는 39자 키를 붙여 넣어 주세요');
+    const remember = !!$('[data-key-remember]')?.checked;
+    const hadOther = !!window.google?.maps && v !== S.settings.apiKey;
+    S.settings = { ...S.settings, apiKey: v, rememberKey: remember, preferDemo: false };
     saveSettings(S.settings);
-    if (changed && window.google?.maps) {
-      // 이미 다른 키로 스크립트를 불러왔다면 새 키는 새로고침 후 적용된다
-      toast('새 키를 적용하려면 새로고침할게요');
+    S.ui.editKey = false;
+    if (hadOther) {
+      // 이미 다른 키로 Google 스크립트를 불러온 상태라 새 키는 새로고침 후 적용된다
+      toast('새 키를 적용하려고 새로고침할게요');
       setTimeout(() => location.reload(), 900);
       return;
     }
     S.ui.sheet = null;
     await connect();
+  },
+  'edit-key': () => {
+    S.ui.editKey = true;
+    renderSheet();
+  },
+  'cancel-key': () => {
+    S.ui.editKey = false;
+    renderSheet();
+  },
+  'delete-key': async () => {
+    if (!confirm('저장된 API 키를 이 기기에서 삭제할까요?')) return;
+    S.settings = { ...S.settings, apiKey: '' };
+    saveSettings(S.settings);
+    S.ui.editKey = false;
+    if (window.google?.maps) {
+      // 메모리에 남은 Google 스크립트까지 비우려면 새로고침이 필요하다
+      toast('키를 삭제했어요. 새로고침할게요');
+      setTimeout(() => location.reload(), 900);
+      return;
+    }
+    toast('키를 삭제했어요');
+    await useDemo();
+    render();
   },
   'use-google': async () => {
     S.settings.preferDemo = false;

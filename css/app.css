@@ -362,6 +362,15 @@ h1 { font-size: 20px; margin: 0; letter-spacing: -0.02em; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .row-actions .btn { flex: 1 1 auto; }
 
+/* ---------- API 키 */
+.key-card { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.key-card code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--soft); border-radius: 6px; padding: 2px 6px; font-size: 13px; }
+.key-card .row-actions { margin: 6px 0 0; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; margin-top: 10px; font-weight: 600; }
+.check input { width: 18px; height: 18px; accent-color: var(--primary); }
+.sec-notes { margin: 8px 0; padding-left: 18px; font-size: 12.5px; color: var(--ink2); }
+.sec-notes li { margin: 3px 0; }
+
 /* ---------- 토스트 */
 .toast {
   position: fixed; left: 50%; bottom: calc(84px + var(--safe-b)); transform: translateX(-50%); z-index: 2000;
