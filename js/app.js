@@ -663,6 +663,13 @@ function freeHTML(from, to, anchor) {
   </div>`;
 }
 
+// 한 칸 위/아래로 옮길 수 있는지: 첫날 '숙소 도착' 앞으로는 식사만, 고정 자리는 움직이지 않는다
+function moveability(day, i) {
+  const s = day.stops[i];
+  const prev = day.stops[i - 1];
+  return { up: !s.fixed && i > 0 && (!prev?.fixed || !!s.meal), down: !s.fixed && i < day.stops.length - 1 };
+}
+
 function stopHTML(row, di, edit = false, day = null) {
   const s = row.stop;
   const classes = ['stop', S.ui.focus === s.uid ? 'is-active' : '', s.fixed ? 'is-fixed' : '', edit ? 'is-edit' : '', S.ui.flash === s.uid ? 'flash' : ''].join(' ');
@@ -672,20 +679,31 @@ function stopHTML(row, di, edit = false, day = null) {
     <div class="stop-time"><b>${fmtTime(row.arrive)}</b><small>~${fmtTime(row.depart)}</small></div>
     <div class="stop-num">${row.num ?? '🏨'}</div>`;
   if (!edit) {
-    return `<div class="${classes}" style="--c:${color(di)}" data-uid="${esc(s.uid)}">${head}
-    <button class="stop-body" data-action="open-stop" data-uid="${esc(s.uid)}">
-      <span class="stop-name">${s.fixed ? '' : `${KIND[s.kind]?.icon || '📍'} `}${name}</span>
-      <span class="stop-meta">${meta}</span>
-      ${row.info ? `<span class="info">${esc(row.info)}</span>` : ''}
-      ${row.warn ? `<span class="warn">⚠ ${esc(row.warn)}</span>` : ''}
-    </button>
+    const quick = S.ui.quick === s.uid;
+    const mv = quick ? moveability(day, row.index) : null;
+    return `<div class="${classes} ${quick ? 'quick' : ''}" style="--c:${color(di)}" data-uid="${esc(s.uid)}">${head}
+    <div class="stop-card">
+      <button class="stop-body" data-action="open-stop" data-uid="${esc(s.uid)}">
+        <span class="stop-name">${s.fixed ? '' : `${KIND[s.kind]?.icon || '📍'} `}${name}</span>
+        <span class="stop-meta">${meta}</span>
+        ${row.info ? `<span class="info">${esc(row.info)}</span>` : ''}
+        ${row.warn ? `<span class="warn">⚠ ${esc(row.warn)}</span>` : ''}
+      </button>
+      ${
+        quick
+          ? `<div class="quick-bar" role="group" aria-label="${esc(s.name)} 순서 바꾸기">
+        <button data-action="quick-move" data-d="-1" ${mv.up ? '' : 'disabled'} aria-label="한 칸 위로">‹ <small>위로</small></button>
+        <button class="qb-cancel" data-action="quick-cancel">취소</button>
+        <button data-action="quick-move" data-d="1" ${mv.down ? '' : 'disabled'} aria-label="한 칸 아래로"><small>아래로</small> ›</button>
+      </div>`
+          : ''
+      }
+    </div>
   </div>`;
   }
   // 편집 모드: 순서(▲▼)·머무는 시간·삭제
   const i = row.index;
-  const prevStop = day.stops[i - 1];
-  const canUp = !s.fixed && i > 0 && (!prevStop?.fixed || !!s.meal);
-  const canDown = !s.fixed && i < day.stops.length - 1;
+  const { up: canUp, down: canDown } = moveability(day, i);
   const u = esc(s.uid);
   return `<div class="${classes}" style="--c:${color(di)}" data-uid="${u}">${head}
     <div class="stop-body edit-body">
@@ -804,6 +822,7 @@ function dayHTML(di) {
       .join('')}</ol>
     ${!t.hotel ? `<div class="banner banner-err">숙소가 없어 출발·복귀 동선을 계산할 수 없어요. <button class="link" data-action="edit-setup" data-step="2">숙소 설정</button></div>` : ''}
     <div class="timeline">${parts.join('')}</div>
+    ${!edit && real.length >= 2 ? '<p class="lp-hint">💡 일정 카드를 꾹 누르면 바로 순서를 바꿀 수 있어요</p>' : ''}
     ${
       !real.length
         ? `<div class="empty big"><p>아직 이 날 일정이 비어 있어요.</p><button class="btn btn-primary" data-action="open-rec" data-tab="sight">숙소 주변 가볼만한 곳 추천받기</button></div>`
@@ -1763,7 +1782,37 @@ const actions = {
     S.ui.search = { q: '', results: [], loading: false, error: '' };
     render({ fit: true, resetScroll: true });
   },
+  'quick-move': (d) => {
+    const f = findStop(S.ui.quick);
+    S.ui.quick = null;
+    if (!f) return render();
+    const list = S.trip.days[f.di].stops;
+    const j = f.i + Number(d.d);
+    if (j < 0 || j >= list.length || !moveability(S.trip.days[f.di], f.i)[Number(d.d) < 0 ? 'up' : 'down']) return render();
+    [list[f.i], list[j]] = [list[j], list[f.i]];
+    save();
+    S.ui.flash = f.s.uid;
+    render();
+    toast(`${f.s.name} ${Number(d.d) < 0 ? '위로' : '아래로'} 옮겼어요`, {
+      label: '되돌리기',
+      fn: () => {
+        const g = findStop(f.s.uid);
+        if (!g) return;
+        const l = S.trip.days[g.di].stops;
+        const k = g.i - Number(d.d);
+        if (k < 0 || k >= l.length) return;
+        [l[g.i], l[k]] = [l[k], l[g.i]];
+        save();
+        render();
+      },
+    });
+  },
+  'quick-cancel': () => {
+    S.ui.quick = null;
+    render();
+  },
   'edit-order': () => {
+    S.ui.quick = null;
     S.ui.edit = !S.ui.edit;
     S.ui.sheet = null;
     render();
@@ -1771,6 +1820,7 @@ const actions = {
   day: (d) => {
     S.ui.day = Number(d.day);
     S.ui.edit = false;
+    S.ui.quick = null;
     S.ui.sheet = null;
     S.ui.focus = null;
     render({ fit: true, resetScroll: true });
@@ -2015,6 +2065,17 @@ const actions = {
 };
 
 function onClick(e) {
+  if (Date.now() < longPress.suppressUntil) {
+    // 길게 누른 직후 손을 뗄 때 생기는 클릭은 무시(상세 화면이 열리지 않도록)
+    e.preventDefault();
+    return;
+  }
+  if (S.ui.quick && !e.target.closest('.quick-bar')) {
+    e.preventDefault();
+    S.ui.quick = null;
+    render();
+    return;
+  }
   if (e.target.id === 'detail') return closeDetail();
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
@@ -2062,6 +2123,43 @@ function onKey(e) {
   el.blur();
   if (el.dataset.search === 'rec') actions['rec-search']();
   else doSearch(el.dataset.search);
+}
+
+// ---------------------------------------------------------------- 일정 카드 길게 누르기 → 빠른 순서 이동
+const longPress = { timer: null, uid: null, x: 0, y: 0, fired: false, suppressUntil: 0 };
+function watchLongPress() {
+  const clear = () => {
+    clearTimeout(longPress.timer);
+    longPress.timer = null;
+  };
+  document.addEventListener('pointerdown', (e) => {
+    const body = e.target.closest('.stop:not(.is-edit):not(.is-fixed) .stop-body');
+    if (!body || S.ui.quick || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    Object.assign(longPress, { uid: body.dataset.uid, x: e.clientX, y: e.clientY, fired: false });
+    clear();
+    longPress.timer = setTimeout(() => {
+      longPress.fired = true;
+      longPress.timer = null;
+      S.ui.quick = longPress.uid;
+      navigator.vibrate?.(15);
+      render();
+    }, 480);
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (longPress.timer && Math.hypot(e.clientX - longPress.x, e.clientY - longPress.y) > 10) clear();
+  });
+  const end = () => {
+    clear();
+    if (longPress.fired) longPress.suppressUntil = Date.now() + 200;
+    longPress.fired = false;
+  };
+  document.addEventListener('pointerup', end);
+  document.addEventListener('pointercancel', end);
+  document.addEventListener('scroll', clear, true);
+  // 길게 누를 때 뜨는 브라우저 메뉴(복사·공유 등) 막기
+  document.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.stop .stop-body')) e.preventDefault();
+  });
 }
 
 // ---------------------------------------------------------------- 모바일 키보드 복구
@@ -2115,6 +2213,7 @@ function mount() {
   document.addEventListener('keydown', onKey);
   routes.onChange = () => render();
   watchKeyboard();
+  watchLongPress();
   window.addEventListener('gm-auth-failure', async () => {
     S.providerError = 'API 키 인증에 실패했어요. 키 값, 결제 계정 연결, 사용 API(Maps JavaScript·Places (New)·Routes), 웹사이트 제한(리퍼러)을 확인해 주세요.';
     await useDemo();

@@ -541,3 +541,27 @@ h1 { font-size: 20px; margin: 0; letter-spacing: -0.02em; }
 .err-box { margin: 12px 0; padding: 12px; border-radius: 12px; background: #fef2f2; border: 1px solid #fecaca; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .err-box p { margin: 0; font-size: 13.5px; color: #991b1b; font-weight: 600; line-height: 1.5; }
 .err-box small { font-size: 11px; word-break: break-all; }
+
+/* ---------- 카드 길게 누르기 → 빠른 순서 이동 */
+.stop-card { grid-area: body; position: relative; min-width: 0; display: flex; }
+.stop-card .stop-body { flex: 1; }
+.stop:not(.is-edit) .stop-body { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: transform 0.15s ease, filter 0.15s ease; }
+.stop:not(.is-edit):not(.is-fixed) .stop-body:active { transform: scale(0.985); }
+.stop.quick .stop-body { filter: brightness(0.5); transform: scale(0.98); }
+.quick-bar {
+  position: absolute; inset: 0; z-index: 2; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px;
+  padding: 8px; border-radius: var(--radius); background: rgba(17, 24, 39, 0.55); animation: qb-in 0.15s ease-out;
+}
+@keyframes qb-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .quick-bar { animation: none; } .stop-body { transition: none; } }
+.quick-bar button {
+  height: 46px; border-radius: 12px; border: 0; background: #fff; color: var(--ink); font-size: 20px; font-weight: 800;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.quick-bar button small { font-size: 12.5px; font-weight: 700; }
+.quick-bar button:disabled { opacity: 0.35; }
+.quick-bar .qb-cancel { background: #111827; color: #fff; font-size: 14px; padding: 0 14px; border: 1px solid rgba(255, 255, 255, 0.5); }
+.lp-hint { margin: 10px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
+/* 알림이 아래 카드를 가리지 않도록: 알림 자체는 터치를 통과시키고 버튼만 받는다 */
+.toast { pointer-events: none; }
+.toast button { pointer-events: auto; }
