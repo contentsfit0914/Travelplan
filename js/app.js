@@ -249,6 +249,11 @@ function render(opts = {}) {
   if (!opts.resetScroll) panel.scrollTop = scroll;
   else panel.scrollTop = 0;
   renderSheet();
+  if (S.ui.flash) {
+    // 옮긴 카드가 화면 안에 보이도록 하고 잠깐 강조
+    panel.querySelector(`.stop[data-uid="${CSS.escape(S.ui.flash)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    S.ui.flash = null;
+  }
   $('.app').classList.toggle('map-big', S.ui.mapBig);
   $('#modeBadge').innerHTML = isDemo()
     ? `<button data-action="open-settings" class="badge-demo">${CFG.preview ? '미리보기' : '데모 모드'}</button>`
@@ -532,7 +537,9 @@ function planHTML() {
   ${
     di === -1
       ? ''
-      : `<footer class="action-bar rec-bar">
+      : S.ui.edit && t.days[di].stops.some((x) => !x.fixed)
+        ? `<footer class="action-bar"><button class="btn btn-primary" data-action="edit-order">✓ 편집 완료</button></footer>`
+        : `<footer class="action-bar rec-bar">
     <button class="btn" data-action="open-rec" data-tab="sight">🏛 가볼만한 곳</button>
     <button class="btn" data-action="open-rec" data-tab="food">🍜 맛집</button>
     <button class="btn" data-action="open-rec" data-tab="cafe">☕ 카페</button>
@@ -565,8 +572,9 @@ function modeLabel(leg, pref) {
   return `${m.icon} ${m.label} ${leg.min ? fmtDur(leg.min) : '바로 옆'}${pref === 'AUTO' || !pref ? '' : ' ·고정'}`;
 }
 
-function legHTML(leg, from, to, ref, pref, di) {
+function legHTML(leg, from, to, ref, pref, di, compact = false) {
   if (!leg) return '';
+  if (compact) return `<div class="leg compact" style="--c:${color(di)}"><span>${MODES[leg.mode].icon} ${leg.min ? fmtDur(leg.min) : '바로 옆'}</span></div>`;
   const lines = (leg.lines || [])
     .map((l) => `<span class="line-chip" style="${cssColor(l.color) ? `--lc:${cssColor(l.color)}` : ''}" title="${esc(l.from)} → ${esc(l.to)} (${l.stops}정거장)">${esc(l.name)}</span>`)
     .join('');
@@ -575,7 +583,7 @@ function legHTML(leg, from, to, ref, pref, di) {
     <button class="leg-mode" data-action="cycle-mode" data-ref="${ref}">${modeLabel(leg, pref)}</button>
     <span class="leg-km">${leg.km ? fmtKm(leg.km) : ''}</span>${tag}
     ${lines ? `<span class="lines">${lines}</span>` : ''}
-    <a class="leg-link" href="${dirUrl(from, to, leg.mode)}" target="_blank" rel="noopener">길찾기 ↗</a>
+    <a class="leg-link" href="${dirUrl(from, to, leg.mode)}" target="_blank" rel="noopener" aria-label="Google 지도 길찾기">길찾기 ↗</a>
   </div>`;
 }
 
@@ -586,18 +594,16 @@ function anchorName(a) {
 }
 
 function gapHTML(g) {
-  const diff = g.dev === 0 ? '목표 시각 그대로' : `목표 ${fmtTime(g.time)}보다 ${fmtDur(Math.abs(g.dev))} ${g.dev > 0 ? '늦게' : '일찍'}`;
-  const status = g.ok ? `<em class="ok-txt">오차범위 ${fmtDur(g.tol)} 안</em>` : `<em class="warn-txt">오차범위 ${fmtDur(g.tol)} 밖</em>`;
+  const late = g.dev === 0 ? '목표 시각' : `목표보다 ${fmtDur(Math.abs(g.dev))} ${g.dev > 0 ? '늦음' : '빠름'}`;
   return `<div class="gap">
     <div class="stop-time"><b>${fmtTime(g.at)}</b><small>${g.label}</small></div>
     <div class="gap-ico">🍽</div>
     <div class="gap-card">
       <button class="gap-main" data-action="open-rec" data-tab="food" data-gap="${g.type}">
-        <b>${g.label} 식당이 비어 있어요</b>
-        <span class="gap-meta">${diff} · ${status}</span>
-        <small>${esc(anchorName(g.anchor))}에서 ${budgetLabel(g.budget)} 맛집 찾기 ›</small>
+        <b>${g.label} 식당 고르기 ›</b>
+        <small>${esc(anchorName(g.anchor))}에서 ${g.budget <= 15 ? `도보 ${g.budget}분` : `${g.budget}분`} 이내 · <em class="${g.ok ? 'ok-txt' : 'warn-txt'}">${late}</em></small>
       </button>
-      <button class="gap-skip" data-action="skip-meal" data-meal="${g.type}">건너뛰기</button>
+      <button class="gap-skip" data-action="skip-meal" data-meal="${g.type}" aria-label="${g.label} 건너뛰기">건너뛰기</button>
     </div>
   </div>`;
 }
@@ -611,30 +617,55 @@ function freeHTML(from, to, anchor) {
   return `<div class="free">
     <span class="free-line"></span>
     <button data-action="open-rec" data-tab="sight" data-anchor="${a}">
-      <b>${fmtTime(from)} ~ ${fmtTime(to)} · ${fmtDur(to - from)} 비어 있어요</b>
-      <small>이 근처 가볼만한 곳 추천받기 ›</small>
+      <span>⏳ ${fmtTime(from)}–${fmtTime(to)} <b>${fmtDur(to - from)} 비어 있음</b></span>
+      <small>근처 추천 ›</small>
     </button>
   </div>`;
 }
 
-function stopHTML(row, di) {
+function stopHTML(row, di, edit = false, day = null) {
   const s = row.stop;
-  const active = S.ui.focus === s.uid ? 'is-active' : '';
+  const classes = ['stop', S.ui.focus === s.uid ? 'is-active' : '', s.fixed ? 'is-fixed' : '', edit ? 'is-edit' : '', S.ui.flash === s.uid ? 'flash' : ''].join(' ');
   const name = s.fixed === 'arrival' ? '숙소 도착 · 짐 풀고 쉬기' : esc(s.name);
   const meta = s.fixed === 'arrival' ? esc(s.name) : `${s.must ? '<em class="badge">메인</em>' : ''}${s.meal ? `<em class="badge meal">${MEAL_LABEL[s.meal]}</em>` : ''}${ratingHTML(s)} ${placeMeta(s)}`;
-  return `<div class="stop ${active} ${s.fixed ? 'is-fixed' : ''}" style="--c:${color(di)}" data-uid="${esc(s.uid)}">
+  const head = `
     <div class="stop-time"><b>${fmtTime(row.arrive)}</b><small>~${fmtTime(row.depart)}</small></div>
-    <div class="stop-num">${row.num ?? '🏨'}</div>
+    <div class="stop-num">${row.num ?? '🏨'}</div>`;
+  if (!edit) {
+    return `<div class="${classes}" style="--c:${color(di)}" data-uid="${esc(s.uid)}">${head}
     <button class="stop-body" data-action="open-stop" data-uid="${esc(s.uid)}">
       <span class="stop-name">${s.fixed ? '' : `${KIND[s.kind]?.icon || '📍'} `}${name}</span>
       <span class="stop-meta">${meta}</span>
       ${row.info ? `<span class="info">${esc(row.info)}</span>` : ''}
       ${row.warn ? `<span class="warn">⚠ ${esc(row.warn)}</span>` : ''}
     </button>
-    <div class="stay">
-      <button data-action="stay" data-uid="${esc(s.uid)}" data-d="-15" aria-label="머무는 시간 줄이기">−</button>
-      <span>${fmtDur(s.stay)}</span>
-      <button data-action="stay" data-uid="${esc(s.uid)}" data-d="15" aria-label="머무는 시간 늘리기">＋</button>
+  </div>`;
+  }
+  // 편집 모드: 순서(▲▼)·머무는 시간·삭제
+  const i = row.index;
+  const prevStop = day.stops[i - 1];
+  const canUp = !s.fixed && i > 0 && (!prevStop?.fixed || !!s.meal);
+  const canDown = !s.fixed && i < day.stops.length - 1;
+  const u = esc(s.uid);
+  return `<div class="${classes}" style="--c:${color(di)}" data-uid="${u}">${head}
+    <div class="stop-body edit-body">
+      <span class="stop-name">${s.fixed ? '' : `${KIND[s.kind]?.icon || '📍'} `}${name}</span>
+      <div class="edit-ctrl">
+        <div class="stay mini" role="group" aria-label="머무는 시간">
+          <button data-action="stay" data-uid="${u}" data-d="-15" aria-label="머무는 시간 15분 줄이기">−</button>
+          <span>${fmtDur(s.stay)}</span>
+          <button data-action="stay" data-uid="${u}" data-d="15" aria-label="머무는 시간 15분 늘리기">＋</button>
+        </div>
+        ${s.fixed ? '' : `<button class="del-btn" data-action="remove-stop" data-uid="${u}" aria-label="${esc(s.name)} 삭제">삭제</button>`}
+      </div>
+    </div>
+    <div class="reorder">
+      ${
+        s.fixed
+          ? '<span class="fixed-note">고정</span>'
+          : `<button data-action="move" data-uid="${u}" data-d="-1" ${canUp ? '' : 'disabled'} aria-label="${esc(s.name)} 위로">▲</button>
+             <button data-action="move" data-uid="${u}" data-d="1" ${canDown ? '' : 'disabled'} aria-label="${esc(s.name)} 아래로">▼</button>`
+      }
     </div>
   </div>`;
 }
@@ -650,6 +681,7 @@ function dayHTML(di) {
   const foods = real.filter((s) => s.kind !== 'sight').length;
   const pending = r.rows.some((x) => x.leg?.pending) || r.back?.pending;
   const routeUrl = dayRouteUrl(di);
+  const edit = S.ui.edit && real.length > 0;
 
   // 타임라인 조립
   const parts = [];
@@ -661,22 +693,23 @@ function dayHTML(di) {
   let prev = r.origin;
   let free = r.win.start;
   const gapWithFree = (g) => {
+    if (edit) return; // 편집 중엔 순서에 집중하도록 식사·빈 시간 카드를 숨긴다
     if (g.at - free >= 60) parts.push(freeHTML(free, g.at, g.anchor));
     parts.push(gapHTML(g));
     free = Math.max(free, g.at + t.mealMinutes);
   };
   r.rows.forEach((row, i) => {
     r.gaps.filter((g) => g.index === i).forEach(gapWithFree);
-    parts.push(legHTML(row.leg, prev, row.stop, `stop:${row.stop.uid}`, row.stop.mode, di));
-    parts.push(stopHTML(row, di));
+    parts.push(legHTML(row.leg, prev, row.stop, `stop:${row.stop.uid}`, row.stop.mode, di, edit));
+    parts.push(stopHTML(row, di, edit, day));
     prev = row.stop;
     free = row.depart;
   });
   const tailGaps = r.gaps.filter((g) => g.index >= r.rows.length);
   tailGaps.forEach(gapWithFree);
   const openTail = tailGaps.length > 0 || (r.rows.length && r.free >= 90);
-  if (r.rows.length && r.free >= 90) parts.push(freeHTML(free, r.win.rawEnd - (r.back?.min || 0), prev));
-  if (r.back) parts.push(legHTML(r.back, prev, t.hotel, `back:${di}`, day.returnMode, di));
+  if (!edit && r.rows.length && r.free >= 90) parts.push(freeHTML(free, r.win.rawEnd - (r.back?.min || 0), prev));
+  if (r.back) parts.push(legHTML(r.back, prev, t.hotel, `back:${di}`, day.returnMode, di, edit));
   const backLabel = r.dep ? '숙소 복귀 · 짐 찾기' : '숙소 복귀';
   if (t.hotel && r.back)
     parts.push(
@@ -686,7 +719,7 @@ function dayHTML(di) {
     );
   if (r.dep) {
     parts.push(anchorHTML(r.dep.leaveBy, '🧳', '공항으로 출발', '늦어도 이 시각에는 숙소를 나서야 해요', 'end'));
-    parts.push(legHTML(r.dep.leg, t.hotel, r.dep.airport, 'airout', t.departure.mode, di));
+    parts.push(legHTML(r.dep.leg, t.hotel, r.dep.airport, 'airout', t.departure.mode, di, edit));
     parts.push(anchorHTML(r.dep.atAirport, '🛫', `${esc(r.dep.airport.name)} 도착`, `이륙 ${t.departure.time} · ${fmtDur(t.airportBufferMin)} 전`, 'end'));
   }
 
@@ -719,12 +752,14 @@ function dayHTML(di) {
         ${r.overflow ? `<span class="over">⚠ ${fmtDur(r.overflow)} 초과${r.dep ? ' · 비행기 시간 확인' : ''}</span>` : `<span class="ok">여유 ${fmtDur(r.free)}</span>`}
       </div>
       <div class="sum-actions">
-        <button class="btn btn-sm" data-action="optimize" ${real.length < 2 ? 'disabled' : ''}>⇅ 동선 최적화</button>
-        ${routeUrl ? `<a class="btn btn-sm" href="${routeUrl}" target="_blank" rel="noopener">🗺 Google 지도로 보기</a>` : ''}
+        <button class="btn btn-sm ${edit ? 'btn-primary' : ''}" data-action="edit-order" ${real.length ? '' : 'disabled'}>${edit ? '✓ 편집 완료' : '↕ 순서·시간 편집'}</button>
+        <button class="btn btn-sm" data-action="optimize" ${real.length < 2 ? 'disabled' : ''}>⇅ 자동 최적화</button>
+        ${routeUrl && !edit ? `<a class="btn btn-sm" href="${routeUrl}" target="_blank" rel="noopener" aria-label="Google 지도로 하루 경로 보기">🗺 지도</a>` : ''}
         ${pending ? '<span class="muted small"><span class="spinner sm"></span> 실제 경로 계산 중</span>' : ''}
       </div>
     </div>
-    <ol class="flow">${flow
+    ${edit ? `<div class="edit-hint">▲▼로 순서를 바꾸면 도착 시간과 이동 경로가 바로 다시 계산돼요.</div>` : ''}
+    <ol class="flow" ${edit ? 'hidden' : ''}>${flow
       .map((f) => `<li class="${f.done ? 'done' : ''}"><button ${f.action || 'disabled'}><span class="fn">${f.done ? '✓' : f.n}</span><span><b>${f.label}</b><small>${f.sub}</small></span></button></li>`)
       .join('')}</ol>
     ${!t.hotel ? `<div class="banner banner-err">숙소가 없어 출발·복귀 동선을 계산할 수 없어요. <button class="link" data-action="edit-setup" data-step="2">숙소 설정</button></div>` : ''}
@@ -1542,8 +1577,14 @@ const actions = {
     S.ui.search = { q: '', results: [], loading: false, error: '' };
     render({ fit: true, resetScroll: true });
   },
+  'edit-order': () => {
+    S.ui.edit = !S.ui.edit;
+    S.ui.sheet = null;
+    render();
+  },
   day: (d) => {
     S.ui.day = Number(d.day);
+    S.ui.edit = false;
     S.ui.sheet = null;
     S.ui.focus = null;
     render({ fit: true, resetScroll: true });
@@ -1648,11 +1689,15 @@ const actions = {
   },
   move: (d) => {
     const f = findStop(d.uid);
+    if (!f) return;
     const list = S.trip.days[f.di].stops;
     const j = f.i + Number(d.d);
-    if (j < 0 || j >= list.length) return;
+    if (j < 0 || j >= list.length || f.s.fixed) return;
+    // 첫날 '숙소 도착' 앞으로는 식사만 옮길 수 있다
+    if (list[j].fixed && !f.s.meal) return toast('숙소 도착 전에는 식사만 넣을 수 있어요');
     [list[f.i], list[j]] = [list[j], list[f.i]];
     save();
+    S.ui.flash = f.s.uid;
     render();
   },
   'move-day': (d) => {
