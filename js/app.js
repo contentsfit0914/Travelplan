@@ -166,6 +166,46 @@ function dayRouteUrl(di) {
   return `https://www.google.com/maps/dir/?${q}`;
 }
 
+// ---------------------------------------------------------------- 오류 안내
+// Google Cloud 설정 문제(API 미사용·키 제한·결제)를 알아보기 쉬운 한국어 안내와 해결 링크로 바꾼다
+function explainError(e, prefix) {
+  const raw = String(e?.message || e || '');
+  const project = raw.match(/project[=\s]+(\d{6,})/i)?.[1];
+  const q = project ? `?project=${project}` : '';
+  const api = /routes/i.test(raw) ? { name: 'Routes API', svc: 'routes.googleapis.com' } : { name: 'Places API (New)', svc: 'places.googleapis.com' };
+  if (/has not been used in project|it is disabled|SERVICE_DISABLED/i.test(raw))
+    return {
+      msg: `Google Cloud에서 ${api.name}가 꺼져 있어요. '사용'을 누른 뒤 5~10분 기다렸다가 새로고침해 주세요.`,
+      link: `https://console.cloud.google.com/apis/library/${api.svc}${q}`,
+      label: `${api.name} 켜러 가기`,
+    };
+  if (/API_KEY_SERVICE_BLOCKED|not authorized to use this (service|API)|are blocked/i.test(raw))
+    return {
+      msg: `API 키의 'API 제한사항'에 ${api.name}가 빠져 있어요. 키 수정 화면에서 체크하고 저장해 주세요.`,
+      link: `https://console.cloud.google.com/apis/credentials${q}`,
+      label: 'API 키 설정 열기',
+    };
+  if (/REFERRER|referer/i.test(raw))
+    return {
+      msg: `API 키의 웹사이트 제한에 이 주소(${location.origin}/*)가 없어요. 추가하고 저장해 주세요.`,
+      link: `https://console.cloud.google.com/apis/credentials${q}`,
+      label: 'API 키 설정 열기',
+    };
+  if (/BILLING/i.test(raw))
+    return { msg: '이 프로젝트에 결제 계정이 연결되어 있지 않아요.', link: 'https://console.cloud.google.com/billing', label: '결제 설정 열기' };
+  return { msg: `${prefix}. 잠시 후 다시 시도해 주세요.`, detail: raw.slice(0, 160) };
+}
+
+function errorHTML(err) {
+  if (!err) return '';
+  if (typeof err === 'string') return `<div class="empty err">${esc(err)}</div>`;
+  return `<div class="err-box">
+    <p>⚠ ${esc(err.msg)}</p>
+    ${err.link ? `<a class="btn btn-sm" href="${esc(err.link)}" target="_blank" rel="noopener">${esc(err.label)} ↗</a>` : ''}
+    ${err.detail ? `<small class="muted">${esc(err.detail)}</small>` : ''}
+  </div>`;
+}
+
 // ---------------------------------------------------------------- 토스트
 let toastTimer;
 function toast(msg, action) {
@@ -375,7 +415,7 @@ function setupStep1() {
 function resultsHTML(kindTarget) {
   const s = S.ui.search;
   if (s.loading) return `<div class="empty"><span class="spinner"></span> 검색 중…</div>`;
-  if (s.error) return `<div class="empty err">${esc(s.error)}</div>`;
+  if (s.error) return errorHTML(s.error);
   if (!s.results.length) return s.q ? `<div class="empty">검색 결과가 없어요. 다른 이름으로 검색해 보세요.</div>` : '';
   return `<ul class="results">${s.results
     .map((p, i) => {
@@ -818,7 +858,7 @@ function recHTML(sh) {
     : '';
   let list;
   if (sh.loading) list = `<div class="empty"><span class="spinner"></span> ${isDemo() ? '샘플에서 찾는 중…' : 'Google 지도에서 찾는 중…'}</div>`;
-  else if (sh.error) list = `<div class="empty err">${esc(sh.error)}</div>`;
+  else if (sh.error) list = errorHTML(sh.error);
   else if (!sh.results.length)
     list = `<div class="empty">${sh.tab === 'search' ? (sh.q ? '검색 결과가 없어요.' : '장소 이름을 검색해 이 날 일정에 넣을 수 있어요.') : '주변에서 찾은 곳이 없어요. 기준 위치를 바꿔 보세요.'}</div>`;
   else {
@@ -1212,7 +1252,7 @@ async function loadRec() {
   } catch (e) {
     if (sh.token !== token) return;
     sh.results = [];
-    sh.error = `추천을 불러오지 못했어요. (${e.message || e})`;
+    sh.error = explainError(e, '추천을 불러오지 못했어요');
   }
   sh.loading = false;
   render();
@@ -1250,7 +1290,7 @@ async function recSearch() {
     sh.results = scoreCandidates(res.filter((p) => p.kind !== 'hotel'), day, centers.length ? centers : [{ lat: 35.6812, lng: 139.7671 }]);
   } catch (e) {
     sh.results = [];
-    sh.error = `검색하지 못했어요. (${e.message || e})`;
+    sh.error = explainError(e, '검색하지 못했어요');
   }
   sh.loading = false;
   sh.resetScroll = true;
@@ -1369,7 +1409,7 @@ async function openDetail(p) {
   } catch (e) {
     detailCache.delete(p.id);
     if (S.ui.detail?.id !== p.id) return;
-    S.ui.detail.error = `상세 정보를 불러오지 못했어요. (${e.message || e})`;
+    S.ui.detail.error = explainError(e, '상세 정보를 불러오지 못했어요');
   }
   S.ui.detail.loading = false;
   renderDetail();
@@ -1401,7 +1441,7 @@ function detailHTML() {
   const web = safeUrl(d.website);
   let body;
   if (dt.loading) body = `<div class="empty"><span class="spinner"></span> 리뷰와 AI 요약을 불러오는 중…</div>`;
-  else if (dt.error) body = `<div class="empty err">${esc(dt.error)}</div>`;
+  else if (dt.error) body = errorHTML(dt.error);
   else {
     const ai = d.ai || {};
     body = `
@@ -1508,7 +1548,7 @@ async function doSearch(target) {
     const res = await S.provider.searchText(q, { kind: target === 'hotel' ? 'hotel' : undefined });
     S.ui.search.results = target === 'hotel' ? res.map((p) => ({ ...p, kind: 'hotel' })) : res;
   } catch (e) {
-    S.ui.search.error = `검색하지 못했어요. (${e.message || e})`;
+    S.ui.search.error = explainError(e, '검색하지 못했어요');
   }
   S.ui.search.loading = false;
   render({ fit: true });
@@ -1558,7 +1598,7 @@ async function quickSpot(q) {
       toast(`${res[0].name} 추가`);
     }
   } catch (e) {
-    toast(`검색 실패: ${e.message || e}`);
+    toast(explainError(e, '검색하지 못했어요').msg);
   }
   S.ui.quickBusy = null;
   render({ fit: true });

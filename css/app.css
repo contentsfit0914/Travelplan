@@ -536,3 +536,8 @@ h1 { font-size: 20px; margin: 0; letter-spacing: -0.02em; }
 .dt-foot { display: flex; gap: 8px; align-items: center; padding: 10px 16px calc(10px + var(--safe-b)); border-top: 1px solid var(--line); background: var(--bg); }
 .dt-foot .btn { flex: 1; }
 .dt-foot .added { flex: 1; text-align: center; padding: 10px; }
+
+/* 설정 오류 안내 */
+.err-box { margin: 12px 0; padding: 12px; border-radius: 12px; background: #fef2f2; border: 1px solid #fecaca; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.err-box p { margin: 0; font-size: 13.5px; color: #991b1b; font-weight: 600; line-height: 1.5; }
+.err-box small { font-size: 11px; word-break: break-all; }
