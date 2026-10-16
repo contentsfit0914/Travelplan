@@ -35,5 +35,11 @@ export function createDemoProvider() {
     throw new Error('DEMO');
   }
 
-  return { name: 'demo', searchText, nearby, route };
+  // 데모에는 리뷰·AI 요약 데이터가 없다(가짜 리뷰를 만들지 않는다)
+  async function details(id) {
+    const p = all.find((x) => x.id === id);
+    return { id, name: p?.name || '', demo: true, editorial: p?.note || '', address: p?.address || '', photos: [], reviews: [], serves: [], ai: {} };
+  }
+
+  return { name: 'demo', searchText, nearby, route, details };
 }

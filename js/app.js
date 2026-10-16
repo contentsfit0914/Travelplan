@@ -848,6 +848,9 @@ function recHTML(sh) {
   </div>`;
 }
 
+// 상세 팝업(리뷰·AI 요약·메뉴)은 음식점·카페·술집에 연다
+const hasDetail = (p) => p.kind === 'food' || p.kind === 'cafe';
+
 function recItemHTML(p, sh) {
   const inDay = placeDay(p.id);
   const focus = S.ui.focus === `cand:${p.id}`;
@@ -859,6 +862,7 @@ function recItemHTML(p, sh) {
       <span class="r-meta">${ratingHTML(p)} ${placeMeta(p)}</span>
       <span class="r-dist">${detour} · ${esc(p.distLabel)}</span>
       ${p.note ? `<span class="r-note">${esc(p.note)}</span>` : ''}
+      ${focus && hasDetail(p) ? '<span class="r-hint">한 번 더 누르면 리뷰·AI 요약 ›</span>' : ''}
     </button>
     <div class="rec-side">
       ${
@@ -1292,6 +1296,7 @@ function focusCand(id, fromMap) {
   const sh = S.ui.sheet;
   const p = sh?.results.find((x) => x.id === id);
   if (!p) return;
+  if (!fromMap && S.ui.focus === `cand:${id}` && hasDetail(p)) return openDetail(p);
   S.ui.focus = `cand:${id}`;
   renderSheet();
   renderMap();
@@ -1348,6 +1353,147 @@ function openStop(u, pan = true) {
   if (S.ui.day !== -1 && S.ui.day !== f.di) S.ui.day = f.di;
   render();
   if (pan) mapView.panTo(f.s, 15);
+}
+
+// ---------------------------------------------------------------- 장소 상세 팝업
+const detailCache = new Map();
+
+async function openDetail(p) {
+  S.ui.detail = { id: p.id, place: p, loading: true, data: null, error: '' };
+  renderDetail();
+  try {
+    if (!detailCache.has(p.id)) detailCache.set(p.id, S.provider.details(p.id));
+    const data = await detailCache.get(p.id);
+    if (S.ui.detail?.id !== p.id) return;
+    S.ui.detail.data = data;
+  } catch (e) {
+    detailCache.delete(p.id);
+    if (S.ui.detail?.id !== p.id) return;
+    S.ui.detail.error = `상세 정보를 불러오지 못했어요. (${e.message || e})`;
+  }
+  S.ui.detail.loading = false;
+  renderDetail();
+}
+
+function closeDetail() {
+  S.ui.detail = null;
+  renderDetail();
+}
+
+const stars = (n) => (n == null ? '' : `<span class="rating">★ ${Number(n).toFixed(1)}</span>`);
+
+function aiBlock(title, a) {
+  return `<div class="ai-card">
+    <div class="ai-title">✨ ${title}</div>
+    <p>${esc(a.text)}</p>
+    <div class="ai-foot">${esc(a.disclosure || 'Gemini로 요약됨')}${a.lang && a.lang.startsWith('ja') ? ' · 일본어 원문' : ''}${safeUrl(a.flag) ? ` · <a href="${esc(safeUrl(a.flag))}" target="_blank" rel="noopener">부적절한 내용 신고</a>` : ''}</div>
+  </div>`;
+}
+
+function detailHTML() {
+  const dt = S.ui.detail;
+  const p = dt.place;
+  const d = dt.data || {};
+  const inDay = placeDay(p.id);
+  const photos = (d.photos?.length ? d.photos : photoOf(p) ? [{ url: photoOf(p), author: p.photoAttr }] : []).filter((x) => safeUrl(x.url, { image: true }));
+  const price = d.priceRange || (p.priceLevel && PRICE[p.priceLevel]) || '';
+  const maps = safeUrl(d.mapsUrl) || placeUrl(p);
+  const web = safeUrl(d.website);
+  let body;
+  if (dt.loading) body = `<div class="empty"><span class="spinner"></span> 리뷰와 AI 요약을 불러오는 중…</div>`;
+  else if (dt.error) body = `<div class="empty err">${esc(dt.error)}</div>`;
+  else {
+    const ai = d.ai || {};
+    body = `
+    ${d.demo ? `<div class="banner">데모 모드라 실제 리뷰·AI 요약이 없어요. Google 지도에 연결하면 볼 수 있어요.</div>` : ''}
+    <section class="dt-sec">
+      <h3>AI 요약</h3>
+      ${ai.review ? aiBlock('리뷰 요약', ai.review) : ''}
+      ${ai.place ? aiBlock('장소 요약', ai.place) : ''}
+      ${!ai.review && !ai.place ? `<p class="muted small">이 장소는 Google AI 요약을 제공하지 않아요.${d.editorial ? '' : ' 아래 리뷰를 참고해 주세요.'}</p>` : ''}
+      ${d.editorial ? `<p class="dt-editorial">${esc(d.editorial)}</p>` : ''}
+    </section>
+    <section class="dt-sec">
+      <h3>메뉴·가격</h3>
+      ${price ? `<p class="dt-price">💴 가격대 ${esc(price)}</p>` : ''}
+      ${d.serves?.length ? `<div class="chips">${d.serves.map((x) => `<span class="chip sm static">${esc(x)}</span>`).join('')}</div>` : ''}
+      <p class="muted small">메뉴판 정보는 Google 지도 API에서 제공되지 않아요. 아래에서 메뉴 사진과 공식 메뉴를 확인할 수 있어요.</p>
+      <div class="row-actions">
+        <a class="btn btn-sm" href="${esc(maps)}" target="_blank" rel="noopener">Google 지도에서 메뉴·사진 ↗</a>
+        ${web ? `<a class="btn btn-sm" href="${esc(web)}" target="_blank" rel="noopener">공식 웹사이트 ↗</a>` : ''}
+      </div>
+    </section>
+    <section class="dt-sec">
+      <h3>리뷰 ${d.reviews?.length ? `<span class="muted">${d.reviews.length}개</span>` : ''}</h3>
+      ${
+        d.reviews?.length
+          ? `<ul class="reviews">${d.reviews
+              .map(
+                (r, i) => `<li>
+            <div class="rv-head">${safeUrl(r.authorUrl) ? `<a href="${esc(safeUrl(r.authorUrl))}" target="_blank" rel="noopener">${esc(r.author)}</a>` : `<b>${esc(r.author)}</b>`} ${stars(r.rating)} <span class="muted small">${esc(r.when)}</span></div>
+            <p class="rv-text" id="rv-${i}">${esc(r.text)}</p>
+            ${r.text.length > 140 ? `<button class="link small" data-action="toggle-review" data-i="${i}">더 보기</button>` : ''}
+          </li>`,
+              )
+              .join('')}</ul>`
+          : '<p class="muted small">표시할 리뷰가 없어요.</p>'
+      }
+      <a class="link small" href="${esc(maps)}" target="_blank" rel="noopener">Google 지도에서 리뷰 더 보기 ↗</a>
+    </section>
+    ${
+      d.address || d.phone || d.hoursText?.length
+        ? `<section class="dt-sec"><h3>정보</h3>
+      ${d.address ? `<p class="small">📍 ${esc(d.address)}</p>` : ''}
+      ${d.phone ? `<p class="small">📞 <span class="selectable">${esc(d.phone)}</span></p>` : ''}
+      ${d.hoursText?.length ? `<details class="small"><summary>영업시간</summary>${d.hoursText.map((h) => `<div>${esc(h)}</div>`).join('')}</details>` : ''}
+    </section>`
+        : ''
+    }`;
+  }
+  return `<div class="detail" role="dialog" aria-modal="true" aria-labelledby="dtTitle">
+    <header class="dt-head">
+      <div class="dt-title">
+        <h2 id="dtTitle">${esc(p.name)}</h2>
+        <div class="r-meta">${ratingHTML(p)} ${placeMeta(p)}</div>
+      </div>
+      <button class="icon-btn" data-action="close-detail" aria-label="닫기">${ICON.close}</button>
+    </header>
+    <div class="dt-body">
+      ${
+        photos.length
+          ? `<div class="dt-photos">${photos
+              .map((ph) => `<figure><img src="${esc(safeUrl(ph.url, { image: true }))}" alt="" loading="lazy">${ph.author ? `<figcaption>📷 ${esc(ph.author)}</figcaption>` : ''}</figure>`)
+              .join('')}</div>`
+          : ''
+      }
+      ${body}
+      <p class="dt-attr">장소 정보·리뷰·사진: Google 지도</p>
+    </div>
+    <footer class="dt-foot">
+      ${
+        inDay != null
+          ? `<span class="added">D${inDay + 1}에 추가됨</span>`
+          : S.ui.sheet?.type === 'rec'
+            ? `<button class="btn btn-primary" data-action="detail-add" data-id="${esc(p.id)}">＋ 이 날 일정에 추가</button>`
+            : ''
+      }
+      <button class="btn" data-action="close-detail">닫기</button>
+    </footer>
+  </div>`;
+}
+
+function renderDetail() {
+  const el = $('#detail');
+  if (!S.ui.detail) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  const keep = el.querySelector('.dt-body')?.scrollTop || 0;
+  el.innerHTML = detailHTML();
+  el.hidden = false;
+  el.querySelector('.dt-body').scrollTop = keep;
+  if (!el.contains(document.activeElement)) el.querySelector('[data-action="close-detail"]')?.focus({ preventScroll: true });
 }
 
 // ---------------------------------------------------------------- 설정 단계 동작
@@ -1673,6 +1819,17 @@ const actions = {
     recSearch();
   },
   'focus-cand': (d) => focusCand(d.id, false),
+  'close-detail': closeDetail,
+  'detail-add': (d) => {
+    addCandidate(d.id);
+    renderDetail();
+  },
+  'toggle-review': (d) => {
+    const el = document.getElementById(`rv-${d.i}`);
+    const open = el.classList.toggle('open');
+    const btn = document.querySelector(`[data-action="toggle-review"][data-i="${d.i}"]`);
+    if (btn) btn.textContent = open ? '접기' : '더 보기';
+  },
   'add-cand': (d) => addCandidate(d.id),
   'open-stop': (d) => openStop(d.uid),
   'stop-mode': (d) => {
@@ -1729,6 +1886,8 @@ const actions = {
     });
   },
   'close-sheet': () => {
+    S.ui.detail = null;
+    renderDetail();
     S.ui.sheet = null;
     S.ui.focus = null;
     render();
@@ -1816,6 +1975,7 @@ const actions = {
 };
 
 function onClick(e) {
+  if (e.target.id === 'detail') return closeDetail();
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
   const fn = actions[el.dataset.action];
@@ -1853,6 +2013,7 @@ function onChange(e) {
 }
 
 function onKey(e) {
+  if (e.key === 'Escape' && S.ui.detail && $('#dialog').hidden) return closeDetail();
   if (e.key !== 'Enter') return;
   const el = e.target;
   if (!el.matches('[data-search]')) return;
@@ -1905,6 +2066,7 @@ function mount() {
       <aside id="sheet" class="sheet" aria-live="polite"></aside>
     </div>
     <div id="toast" class="toast" role="status" hidden></div>
+    <div id="detail" class="detail-backdrop" hidden></div>
     <div id="dialog" class="dlg-backdrop" hidden></div>
   </div>`;
   mapView = new MapView(document.getElementById('map'));
