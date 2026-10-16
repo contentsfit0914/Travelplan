@@ -43,8 +43,8 @@ h1 { font-size: 20px; margin: 0; letter-spacing: -0.02em; }
 .small { font-size: 12.5px; }
 
 /* ---------- 레이아웃 */
-.app { display: flex; flex-direction: column; height: 100dvh; height: 100vh; }
-@supports (height: 100dvh) { .app { height: 100dvh; } }
+/* 화면에 고정: 모바일 키보드가 문서를 밀어 올려도 레이아웃은 그대로 유지(복구는 app.js의 resetViewport) */
+.app { position: fixed; inset: 0; display: flex; flex-direction: column; }
 .map-wrap { position: relative; flex: none; height: 34vh; min-height: 200px; transition: height 0.25s ease; background: #dfe7ee; }
 .app.map-big .map-wrap { height: 68vh; }
 #map { position: absolute; inset: 0; }

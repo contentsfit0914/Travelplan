@@ -1156,6 +1156,7 @@ function openStop(u, pan = true) {
 async function doSearch(target) {
   const input = document.querySelector(`[data-search="${target}"]`);
   const q = (input?.value || '').trim();
+  input?.blur();
   S.ui.search = { q, results: [], loading: !!q, error: '' };
   render();
   if (!q) return;
@@ -1423,6 +1424,7 @@ const actions = {
     renderSheet();
   },
   'rec-search': () => {
+    $('[data-search="rec"]')?.blur();
     S.ui.sheet.q = $('[data-search="rec"]')?.value || '';
     recSearch();
   },
@@ -1606,8 +1608,38 @@ function onKey(e) {
   const el = e.target;
   if (!el.matches('[data-search]')) return;
   e.preventDefault();
+  // 키보드의 '검색/완료'를 누르면 키보드를 닫고 화면을 원래대로 돌린다
+  el.blur();
   if (el.dataset.search === 'rec') actions['rec-search']();
   else doSearch(el.dataset.search);
+}
+
+// ---------------------------------------------------------------- 모바일 키보드 복구
+// iOS 등은 입력창에 포커스가 가면 문서를 위로 밀어 올리고, 키보드가 닫혀도 그대로 두는 경우가 있다.
+// 입력 중이 아닐 때는 항상 문서를 맨 위(지도+패널 기본 배치)로 되돌린다.
+const isTyping = () => !!document.activeElement?.matches?.('input:not([type="checkbox"]):not([type="file"]), select, textarea');
+function resetViewport() {
+  if (isTyping()) return;
+  const se = document.scrollingElement || document.documentElement;
+  if (window.scrollY || se.scrollTop || document.body.scrollTop) {
+    window.scrollTo(0, 0);
+    se.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }
+  mapView?.resize();
+}
+function watchKeyboard() {
+  document.addEventListener('focusout', () => setTimeout(resetViewport, 120));
+  window.addEventListener('scroll', () => !isTyping() && window.scrollY && resetViewport(), { passive: true });
+  const vv = window.visualViewport;
+  if (vv) {
+    let last = vv.height;
+    vv.addEventListener('resize', () => {
+      // 높이가 크게 늘었다 = 키보드가 닫혔다
+      if (vv.height > last + 80) setTimeout(resetViewport, 60);
+      last = vv.height;
+    });
+  }
 }
 
 // ---------------------------------------------------------------- 시작
@@ -1631,6 +1663,7 @@ function mount() {
   document.addEventListener('change', onChange);
   document.addEventListener('keydown', onKey);
   routes.onChange = () => render();
+  watchKeyboard();
   window.addEventListener('gm-auth-failure', async () => {
     S.providerError = 'API 키 인증에 실패했어요. 키 값, 결제 계정 연결, 사용 API(Maps JavaScript·Places (New)·Routes), 웹사이트 제한(리퍼러)을 확인해 주세요.';
     await useDemo();
