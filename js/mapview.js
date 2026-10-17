@@ -33,14 +33,14 @@ export class MapView {
         zoom: 12,
         mapId: mapId || 'DEMO_MAP_ID',
         disableDefaultUI: true,
-        zoomControl: true,
+        zoomControl: false, // +/- 버튼은 숨긴다(손가락 확대·축소, 더블 탭 전체 보기는 그대로)
         gestureHandling: 'greedy',
         clickableIcons: false,
         disableDoubleClickZoom: true, // 더블 탭은 '전체 보기'로 쓴다
       });
       this.map.addListener?.('dblclick', () => this.onDblClick?.());
     } else {
-      this.map = window.L.map(this.el, { zoomControl: true, doubleClickZoom: false }).setView([TOKYO.lat, TOKYO.lng], 12);
+      this.map = window.L.map(this.el, { zoomControl: false, doubleClickZoom: false }).setView([TOKYO.lat, TOKYO.lng], 12);
       this.map.on('dblclick', () => this.onDblClick?.());
       this.el.classList.toggle('no-tiles', !tiles);
       if (tiles) {
