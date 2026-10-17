@@ -93,18 +93,36 @@ export function airportPoint(code) {
 }
 // 첫날 공항을 나서는 시각(도착 + 입국 수속 여유)
 export const arrivalReady = (trip) => toMin(trip.arrival.time) + (trip.immigrationMin || 0);
-// 하루의 출발점: 첫날은 공항, 그 외는 숙소
-export const dayOrigin = (trip, di) => (di === 0 && trip.arrival ? airportPoint(trip.arrival.airport) : trip.hotel);
+
+// --- 숙소(날짜별) -------------------------------------------------------------
+// trip.hotels: 등록한 숙소 목록, trip.nightHotel[i]: i번째 밤(i일차 → i+1일차)에 묵는 숙소 id
+export const MOVE_STAY = 20; // 숙소를 옮기는 날 새 숙소에 짐 맡기는 시간(분)
+export function nightHotel(trip, ni) {
+  const hs = trip.hotels || [];
+  if (!hs.length) return trip.hotel || null;
+  const i = Math.max(0, Math.min(ni, (trip.days?.length || 2) - 2));
+  return hs.find((h) => h.id === trip.nightHotel?.[i]) || hs[0];
+}
+// 그날 돌아가는 숙소. 마지막 날은 전날 묵은 숙소(짐 찾기)
+export const dayHotel = (trip, di) => nightHotel(trip, di < trip.days.length - 1 ? di : di - 1);
+// 숙소를 옮기는 날: 아침엔 전날 숙소에서 나와 새 숙소에 짐을 맡긴다
+export const isMoveDay = (trip, di) =>
+  di > 0 && di < trip.days.length - 1 && !!dayHotel(trip, di) && nightHotel(trip, di - 1)?.id !== dayHotel(trip, di).id;
+// 하루의 출발점: 첫날은 공항, 그 외는 전날 묵은 숙소
+export const dayOrigin = (trip, di) => (di === 0 && trip.arrival ? airportPoint(trip.arrival.airport) : nightHotel(trip, di - 1));
+// 하루 일정 중 '숙소 체크인' 고정 자리(첫날 도착·숙소 이동)
+export const checkInStop = (day) => day.stops.find((s) => s.fixed === 'arrival' || s.fixed === 'move') || null;
 
 // 마지막 날: 이륙 - 공항 도착 여유 - 숙소→공항 이동 = 숙소에서 늦어도 출발해야 하는 시각
 export function departurePlan(trip, seg) {
-  if (!trip.departure || !trip.hotel) return null;
+  const di = trip.days.length - 1;
+  const hotel = dayHotel(trip, di);
+  if (!trip.departure || !hotel) return null;
   const airport = airportPoint(trip.departure.airport);
   const flight = toMin(trip.departure.time);
   const atAirport = flight - (trip.airportBufferMin ?? 120);
-  const di = trip.days.length - 1;
-  const leg = seg(trip.hotel, airport, trip.departure.mode || 'AUTO', { di, t: atAirport - 90 });
-  return { airport, flight, atAirport, leg, leaveBy: atAirport - leg.min };
+  const leg = seg(hotel, airport, trip.departure.mode || 'AUTO', { di, t: atAirport - 90 });
+  return { airport, hotel, flight, atAirport, leg, leaveBy: atAirport - leg.min };
 }
 
 // 하루 가용 시간: 첫날은 공항을 나선 뒤부터, 마지막 날은 공항으로 떠나야 하는 시각까지
@@ -162,7 +180,7 @@ export function hoursWarning(stop, dateStr, arrive, depart) {
 // seg(a, b, modePref, ctx) → { min, km, mode, estimated }
 export function computeDay(trip, di, seg) {
   const day = trip.days[di];
-  const hotel = trip.hotel;
+  const hotel = dayHotel(trip, di);
   const win = dayWindow(trip, di, seg);
   const date = dayDate(trip, di);
   const origin = dayOrigin(trip, di);
@@ -191,8 +209,11 @@ export function computeDay(trip, di, seg) {
     else if (stop.kind !== 'hotel') totals.sight += stop.stay;
     let warn = hoursWarning(stop, date, arrive, depart);
     let info = null;
-    if (stop.fixed === 'arrival') {
-      info = arrive < toMin(trip.checkIn) ? `체크인(${trip.checkIn}) 전이라 짐만 맡기고 쉬어요` : '체크인하고 짐 풀기';
+    if (stop.fixed) {
+      const ci = stop.checkIn || hotel?.checkIn || trip.checkIn;
+      const early = arrive < toMin(ci);
+      if (stop.fixed === 'arrival') info = early ? `체크인(${ci}) 전이라 짐만 맡기고 쉬어요` : '체크인하고 짐 풀기';
+      else info = early ? `체크인(${ci}) 전이라 짐만 맡겨 두고 다녀요` : '체크인하고 짐 두기';
     }
     if (stop.meal && !warn && trip[stop.meal]) {
       const d = arrive - toMin(trip[stop.meal]);
@@ -297,8 +318,8 @@ export function timedInsert(trip, di, cand, target, minIndex = 0) {
   return { index: best.index, extra: best.extra };
 }
 
-// 첫날 '숙소 도착' 이전에는 식사 말고는 넣지 않는다(짐을 들고 다니지 않도록)
-export const minInsertIndex = (day) => day.stops.findIndex((s) => s.fixed === 'arrival') + 1;
+// '숙소 도착·이동' 이전에는 식사 말고는 넣지 않는다(짐을 들고 다니지 않도록)
+export const minInsertIndex = (day) => day.stops.findIndex((s) => s.fixed === 'arrival' || s.fixed === 'move') + 1;
 
 // --- 동선 최적화 ------------------------------------------------------------
 function tourCost(order, hotel, est) {
@@ -364,7 +385,7 @@ export function arrangeStops(trip, di, list) {
     ...fixed,
     ...optimizeOrder(
       list.filter((s) => !s.fixed && !timed(s)),
-      trip.hotel,
+      dayHotel(trip, di),
       est,
     ),
   ];
@@ -393,7 +414,10 @@ export function dayCapacity(trip, di) {
   const seg = estimateSeg(trip);
   const w = dayWindow(trip, di, seg);
   let start = w.start;
-  if (di === 0 && trip.arrival && trip.hotel) start += seg(dayOrigin(trip, 0), trip.hotel).min + (trip.restMin ?? 30);
+  const hotel = dayHotel(trip, di);
+  const origin = dayOrigin(trip, di);
+  if (hotel && di === 0 && trip.arrival) start += seg(origin, hotel).min + (trip.restMin ?? 30);
+  else if (isMoveDay(trip, di)) start += seg(origin, hotel).min + MOVE_STAY;
   const end = w.rawEnd;
   const tol = trip.mealTolerance ?? 30;
   let cap = end - start;
@@ -466,7 +490,7 @@ function assignMeals(trip, foods, out) {
         const rank = pref.indexOf(type);
         if (rank < 0 || taken.has(`${di}:${type}`)) continue;
         if (hoursWarning(f, dayDate(trip, di), T, T + trip.mealMinutes)) continue; // 그 시간에 문을 닫으면 제외
-        const center = list.length ? centroid(list) : trip.hotel || f;
+        const center = list.length ? centroid(list) : dayHotel(trip, di) || f;
         const score = distKm(center, f) + rank * 1.5;
         if (!best || score < best.score) best = { di, type, score };
       }
@@ -488,23 +512,26 @@ export function autoDistribute(trip, spots) {
   spots = spots.filter((s) => s.kind !== 'food');
   const est = estimator(trip);
   const caps = Array.from({ length: n }, (_, i) => dayCapacity(trip, i));
-  const load = (list) => {
+  // 하루 부담: 체류 + 그날 숙소에서 출발·복귀하는 이동
+  const load = (list, di) => {
     if (!list.length) return 0;
-    const order = optimizeOrder(list, trip.hotel, est);
-    return list.reduce((s, p) => s + p.stay, 0) + tourCost(order, trip.hotel, est);
+    const h = dayHotel(trip, di);
+    const order = optimizeOrder(list, h, est);
+    return list.reduce((s, p) => s + p.stay, 0) + tourCost(order, h, est);
   };
 
   const k = Math.min(n, spots.length);
   const clusters = spots.length ? kmeans(spots, k).filter((c) => c.length) : [];
   // 스팟이 적어 한 곳씩 흩어진 경우: 3km 안의 묶음은 하루 용량이 허락하면 합친다
   const maxCap = Math.max(...caps);
+  const bestDay = caps.indexOf(maxCap);
   for (let merged = true; merged; ) {
     merged = false;
     let best = null;
     for (let i = 0; i < clusters.length; i++)
       for (let j = i + 1; j < clusters.length; j++) {
         const d = distKm(centroid(clusters[i]), centroid(clusters[j]));
-        if (d < 3 && load([...clusters[i], ...clusters[j]]) <= maxCap && (!best || d < best.d)) best = { i, j, d };
+        if (d < 3 && load([...clusters[i], ...clusters[j]], bestDay) <= maxCap && (!best || d < best.d)) best = { i, j, d };
       }
     if (best) {
       clusters[best.i].push(...clusters[best.j]);
@@ -512,20 +539,32 @@ export function autoDistribute(trip, spots) {
       merged = true;
     }
   }
+  // 큰 묶음부터 '넘치는 시간 + 그날 숙소와의 거리'가 가장 작은 날에 놓는다(숙소가 하나면 여유 많은 날 순)
   const dayIdx = caps.map((c, i) => [c, i]).sort((a, b) => b[0] - a[0]).map(([, i]) => i);
-  clusters.sort((a, b) => load(b) - load(a));
-  clusters.forEach((c, i) => out[dayIdx[i]].push(...c));
+  const used = new Set();
+  clusters.sort((a, b) => load(b, bestDay) - load(a, bestDay));
+  for (const c of clusters) {
+    let pick = null;
+    for (const i of dayIdx) {
+      if (used.has(i)) continue;
+      const h = dayHotel(trip, i);
+      const score = Math.max(0, load(c, i) - caps[i]) * 3 + (h ? distKm(centroid(c), h) * 3 : 0);
+      if (!pick || score < pick.score - 0.01) pick = { i, score };
+    }
+    used.add(pick.i);
+    out[pick.i].push(...c);
+  }
 
   // 과부하 해소: 넘치는 날에서 여유 있는 날로, 그 날 중심에 가장 가까운 스팟을 옮긴다
   for (let guard = 0; guard < 40; guard++) {
-    const over = out.findIndex((list, i) => list.length > 1 && load(list) > caps[i]);
+    const over = out.findIndex((list, i) => list.length > 1 && load(list, i) > caps[i]);
     if (over < 0) break;
     let move = null;
     out.forEach((list, i) => {
       if (i === over) return;
-      const center = list.length ? centroid(list) : trip.hotel || centroid(out[over]);
+      const center = list.length ? centroid(list) : dayHotel(trip, i) || centroid(out[over]);
       for (const p of out[over]) {
-        const after = load([...list, p]);
+        const after = load([...list, p], i);
         if (after > caps[i]) continue;
         const d = distKm(p, center);
         if (!move || d < move.d) move = { p, to: i, d };
@@ -540,15 +579,15 @@ export function autoDistribute(trip, spots) {
   for (const f of assignMeals(trip, foods, out)) {
     let bi = 0;
     out.forEach((list, i) => {
-      const c = list.length ? centroid(list) : trip.hotel || f;
-      const cb = out[bi].length ? centroid(out[bi]) : trip.hotel || f;
+      const c = list.length ? centroid(list) : dayHotel(trip, i) || f;
+      const cb = out[bi].length ? centroid(out[bi]) : dayHotel(trip, bi) || f;
       if (distKm(c, f) < distKm(cb, f)) bi = i;
     });
     out[bi].push(f);
   }
   return out.map((list, di) => {
-    // 첫날 '숙소 도착' 자리가 있으면 포함해서 배치(공항→숙소 이후 시간 기준)
-    const fixed = di === 0 ? (trip.days[0]?.stops || []).filter((s) => s.fixed) : [];
+    // '숙소 도착·이동' 고정 자리가 있으면 포함해서 배치(짐 맡긴 이후 시간 기준)
+    const fixed = (trip.days[di]?.stops || []).filter((s) => s.fixed);
     return arrangeStops(trip, di, [...fixed, ...list]);
   });
 }

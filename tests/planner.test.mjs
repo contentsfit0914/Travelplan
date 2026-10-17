@@ -14,7 +14,12 @@ import {
   fmtTime,
   minInsertIndex,
   budgetRadius,
+  dayHotel,
+  dayOrigin,
+  isMoveDay,
+  departurePlan,
 } from '../js/planner.js';
+import { syncTrip, sanitizeTrip } from '../js/store.js';
 import { DEMO_PLACES } from '../js/data/demo-places.js';
 
 const byId = (id) => {
@@ -297,4 +302,67 @@ test('첫날 숙소 근처 식당은 숙소에 들러 짐을 푼 뒤로 배치�
   const out = arrangeStops(t, 0, [...t.days[0].stops, lunch]);
   assert.equal(out[0].fixed, 'arrival');
   assert.equal(out[1].uid, 'f-omoide');
+});
+
+// ---- 날짜별 숙소 -------------------------------------------------------------
+const H = (id, extra = {}) => ({ ...byId(id), kind: 'hotel', checkIn: '15:00', checkOut: '11:00', ...extra });
+function twoHotels() {
+  // 1~2박 신주쿠, 3~4박 아사쿠사(D3 아침 이동)
+  const t = trip({ hotels: [H('h-shinjuku'), H('h-asakusa', { checkIn: '16:00' })], nightHotel: ['demo:h-shinjuku', 'demo:h-shinjuku', 'demo:h-asakusa', 'demo:h-asakusa'], mustSpots: [] });
+  return syncTrip(t);
+}
+
+test('날짜별 숙소: 그날 돌아갈 숙소·아침 출발 숙소·마지막 날 짐 찾을 숙소', () => {
+  const t = twoHotels();
+  assert.equal(dayHotel(t, 0).id, 'demo:h-shinjuku');
+  assert.equal(dayHotel(t, 2).id, 'demo:h-asakusa');
+  assert.equal(dayOrigin(t, 2).id, 'demo:h-shinjuku');
+  assert.equal(dayHotel(t, 4).id, 'demo:h-asakusa');
+  assert.equal(departurePlan(t, estimateSeg(t)).hotel.id, 'demo:h-asakusa');
+  assert.deepEqual([0, 1, 2, 3, 4].map((d) => isMoveDay(t, d)), [false, false, true, false, false]);
+});
+
+test('숙소를 옮기는 날: 아침에 새 숙소에 짐을 맡기는 고정 자리가 생기고, 밤엔 새 숙소로 돌아간다', () => {
+  const t = twoHotels();
+  assert.equal(t.days[0].stops[0].fixed, 'arrival');
+  assert.equal(t.days[2].stops[0].fixed, 'move');
+  assert.equal(t.days[2].stops[0].id, 'move-hotel');
+  assert.ok(t.days.filter((_, i) => i !== 0 && i !== 2).every((d) => !d.stops.some((s) => s.fixed)));
+  t.days[2].stops.push(byId('sensoji'));
+  const r = computeDay(t, 2, estimateSeg(t));
+  assert.match(r.rows[0].info, /체크인\(16:00\) 전이라 짐만/);
+  assert.equal(r.origin.id, 'demo:h-shinjuku');
+  assert.ok(r.back && r.back.min < 15, '아사쿠사 관광 후 근처 새 숙소로 복귀');
+  assert.equal(minInsertIndex(t.days[2]), 1);
+  // 숙소를 하나로 합치면 이동 자리가 사라진다
+  t.nightHotel = ['demo:h-shinjuku', 'demo:h-shinjuku', 'demo:h-shinjuku', 'demo:h-shinjuku'];
+  syncTrip(t);
+  assert.ok(!t.days[2].stops.some((s) => s.fixed));
+});
+
+test('자동 배분: 관광지 묶음은 가까운 숙소에 묵는 날로 간다', () => {
+  const t = twoHotels();
+  const spots = ['sensoji', 'nakamise', 'skytree', 'meiji', 'takeshita', 'gyoen'].map((id) => ({ ...byId(id), stay: 60 }));
+  const out = autoDistribute(t, spots);
+  const dayOf = (id) => out.findIndex((list) => list.some((s) => s.uid === id));
+  assert.ok([2, 3].includes(dayOf('sensoji')), `아사쿠사 묶음은 아사쿠사 숙소 날(D3·D4): D${dayOf('sensoji') + 1}`);
+  assert.ok([0, 1].includes(dayOf('meiji')), `신주쿠·하라주쿠 묶음은 신주쿠 숙소 날(D1·D2): D${dayOf('meiji') + 1}`);
+});
+
+test('이전 버전(숙소 하나) 데이터는 숙소 목록 하나로 옮기고 모든 밤에 배정한다', () => {
+  const raw = { v: 1, startDate: '2026-11-19', nights: 4, hotel: byId('h-ginza'), checkIn: '14:00', checkOut: '10:00', days: [] };
+  const t = sanitizeTrip(raw);
+  assert.equal(t.hotels.length, 1);
+  assert.equal(t.hotels[0].checkIn, '14:00');
+  assert.equal(t.nightHotel.length, t.nights);
+  assert.ok(t.nightHotel.every((id) => id === 'demo:h-ginza'));
+  assert.equal(t.hotel.id, 'demo:h-ginza');
+});
+
+test('지운 숙소의 밤은 앞 밤의 숙소로 채운다', () => {
+  const t = twoHotels();
+  t.hotels = t.hotels.filter((h) => h.id !== 'demo:h-asakusa');
+  syncTrip(t);
+  assert.ok(t.nightHotel.every((id) => id === 'demo:h-shinjuku'));
+  assert.ok(!t.days.some((d) => d.stops.some((s) => s.fixed === 'move')));
 });
