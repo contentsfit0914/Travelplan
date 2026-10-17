@@ -17,6 +17,7 @@ export class MapView {
     this.kind = null;
     this.map = null;
     this.layers = [];
+    this.avatar = null; // 내 캐릭터 마커(draw()로 지워지지 않는다)
   }
 
   async use(kind, { mapId, tiles = true } = {}) {
@@ -51,6 +52,7 @@ export class MapView {
 
   destroy() {
     this.clear();
+    this.removeAvatar();
     if (this.kind === 'leaflet' && this.map) this.map.remove();
     this.map = null;
     this.kind = null;
@@ -129,6 +131,65 @@ export class MapView {
         this.layers.push(mk);
       }
     }
+  }
+
+  // 내 캐릭터: el(아바타 DOM)을 지도 위 좌표에 둔다. 좌표가 없으면 숨긴다
+  setAvatar(el, pos, onClick) {
+    if (!this.map) return;
+    if (!pos) return this.removeAvatar();
+    if (this.avatar && this.avatarKind !== this.kind) this.removeAvatar();
+    if (!this.avatar) {
+      if (this.kind === 'google') {
+        const mk = new this.AME({ map: this.map, content: el, position: pos, zIndex: 200, gmpClickable: true });
+        mk.addEventListener('gmp-click', () => this.avatarClick?.());
+        this.avatar = mk;
+      } else {
+        const wrap = document.createElement('div');
+        wrap.className = 'lf-anchor';
+        wrap.append(el);
+        const mk = window.L.marker([pos.lat, pos.lng], { icon: window.L.divIcon({ html: wrap, className: 'lf-icon', iconSize: [0, 0] }), zIndexOffset: 2000 }).addTo(this.map);
+        mk.on('click', () => this.avatarClick?.());
+        this.avatar = mk;
+      }
+      this.avatarKind = this.kind;
+    } else {
+      const cur = this.avatarContent();
+      if (cur !== el) {
+        if (this.kind === 'google') this.avatar.content = el;
+        else {
+          cur.replaceWith(el);
+        }
+      }
+      this.moveAvatar(pos);
+    }
+    this.avatarClick = onClick;
+  }
+
+  avatarContent() {
+    if (!this.avatar) return null;
+    return this.kind === 'google' ? this.avatar.content : this.avatar.getElement()?.querySelector('.lf-anchor > *');
+  }
+
+  moveAvatar(pos) {
+    if (!this.avatar || !pos) return;
+    if (this.kind === 'google') this.avatar.position = pos;
+    else this.avatar.setLatLng([pos.lat, pos.lng]);
+  }
+
+  removeAvatar() {
+    if (!this.avatar) return;
+    if (this.avatarKind === 'google') this.avatar.map = null;
+    else this.avatar.remove();
+    this.avatar = null;
+  }
+
+  // 지도 화면 안에 있는지(재생 중 캐릭터가 밖으로 나가면 따라간다)
+  contains(pos) {
+    if (!this.map) return true;
+    if (typeof this.map.getBounds !== 'function') return true;
+    const b = this.map.getBounds();
+    if (!b) return true;
+    return this.kind === 'google' ? b.contains(pos) : b.contains([pos.lat, pos.lng]);
   }
 
   fit(points, maxZoom = 16) {

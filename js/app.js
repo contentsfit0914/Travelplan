@@ -51,10 +51,11 @@ import { RouteCache } from './routes.js';
 import { MapView } from './mapview.js';
 import { createDemoProvider } from './providers/demo.js';
 import { createGoogleProvider } from './providers/google.js';
+import { avatarSVG, cleanAvatar, defaultAvatar, randomAvatar, AVATAR_BODIES, AVATAR_COLORS, AVATAR_FACES, AVATAR_HATS, AVATAR_ITEMS } from './avatar.js';
 import { QUICK_SPOTS, DEMO_PLACES } from './data/demo-places.js';
 
 const CFG = window.TRAVELPLAN_CONFIG || {};
-const DAY_COLORS = ['#F2542D', '#2D7FF9', '#12A57A', '#9B51E0', '#E8A317', '#E0457B', '#0EA5B7', '#64748B', '#8B5CF6', '#D97706'];
+const DAY_COLORS = ["#FF4F3A", "#2F6BFF", "#15A36A", "#8A4DFF", "#F2A20C", "#E8457B", "#1FA2A0", "#5B6B7A", "#7C5CFF", "#C9770A"];
 const KIND = {
   sight: { icon: '📍', label: '관광' },
   food: { icon: '🍜', label: '맛집' },
@@ -75,6 +76,7 @@ const STEP_SHORT = ['', '항공·기본', '숙소', '메인 스팟', '시간·�
 
 const S = {
   trip: loadTrip(),
+  tour: null, // 동선 재생 상태
   settings: loadSettings(),
   provider: createDemoProvider(),
   providerError: '',
@@ -299,6 +301,8 @@ function render(opts = {}) {
     S.ui.flash = null;
   }
   $('.app').classList.toggle('map-big', S.ui.mapBig);
+  if (S.tour && (S.ui.screen !== 'plan' || S.ui.day !== S.tour.di)) stopTour();
+  renderTourBar();
   $('#modeBadge').innerHTML = isDemo()
     ? `<button data-action="open-settings" class="badge-demo">${CFG.preview ? '미리보기' : '데모 모드'}</button>`
     : `<span class="badge-live">Google 지도</span>`;
@@ -327,8 +331,9 @@ function setupHTML() {
   return `
   <div class="sticky-head">
   <header class="topbar">
-    <div>
-      <div class="eyebrow">${t.created ? '여행 설정 수정' : '여행 준비'} ${step}/4</div>
+    ${avatarButton()}
+    <div class="tb-title">
+      <div class="eyebrow">${t.created ? '여행 설정 수정' : '여행 준비'} · ${step}/4</div>
       <h1>${STEP_TITLES[step]}</h1>
     </div>
     ${t.created ? `<button class="btn btn-sm btn-primary" data-action="save-setup" ${datesOk ? '' : 'disabled'}>저장하고 일정 보기</button>` : `<button class="icon-btn" data-action="open-settings" aria-label="설정">${ICON.gear}</button>`}
@@ -611,12 +616,13 @@ function planHTML() {
   return `
   <div class="sticky-head">
   <header class="topbar">
-    <div>
+    ${avatarButton()}
+    <div class="tb-title">
       <div class="eyebrow">${dayLabel(t, 0)} – ${dayLabel(t, t.nights)} · ${t.people}명</div>
       <h1>도쿄 ${t.nights}박 ${t.nights + 1}일</h1>
     </div>
     <div class="top-actions">
-      <button class="btn btn-sm" data-action="edit-setup" data-step="1" aria-label="여행 설정 수정">✎ 설정 수정</button>
+      <button class="btn btn-sm" data-action="edit-setup" data-step="1" aria-label="여행 설정 수정">✎ 설정</button>
       <button class="icon-btn" data-action="share" aria-label="일정 공유">${ICON.share}</button>
       <button class="icon-btn" data-action="open-settings" aria-label="설정">${ICON.gear}</button>
     </div>
@@ -922,7 +928,7 @@ function renderSheet() {
     el.innerHTML = '';
     return;
   }
-  const html = sh.type === 'rec' ? recHTML(sh) : sh.type === 'stop' ? stopSheetHTML(sh) : settingsHTML();
+  const html = sh.type === 'rec' ? recHTML(sh) : sh.type === 'stop' ? stopSheetHTML(sh) : sh.type === 'avatar' ? avatarSheetHTML() : settingsHTML();
   const list = el.querySelector('.sheet-body');
   const keep = list && el.dataset.type === sh.type ? list.scrollTop : 0;
   el.dataset.type = sh.type;
@@ -1126,6 +1132,219 @@ function keySectionHTML() {
     </div>`;
 }
 
+// ---------------------------------------------------------------- 내 캐릭터
+const myAvatar = () => cleanAvatar(S.settings.avatar || defaultAvatar());
+const avatarButton = () => `<button class="av-btn" data-action="open-avatar" aria-label="내 캐릭터 꾸미기">${avatarSVG(myAvatar(), { size: 34, ground: false })}</button>`;
+
+function setAvatar(patch) {
+  S.settings.avatar = cleanAvatar({ ...myAvatar(), ...patch });
+  saveSettings(S.settings);
+  avatarElCache.clear();
+}
+
+function avatarSheetHTML() {
+  const av = myAvatar();
+  const opt = (field, list, make) =>
+    `<div class="av-opts">${list
+      .map(([k, label]) => `<button class="av-opt ${av[field] === k ? 'on' : ''}" data-action="av-set" data-field="${field}" data-value="${k}" aria-label="${label}" title="${label}">${make(k)}<small>${label}</small></button>`)
+      .join('')}</div>`;
+  const mini = (o) => avatarSVG({ ...av, ...o }, { size: 40, ground: false });
+  return `
+  <div class="sheet-head"><b>내 캐릭터</b><button class="icon-btn" data-action="close-sheet" aria-label="닫기">${ICON.close}</button></div>
+  <div class="sheet-body av-sheet">
+    <div class="av-stage"><div class="av-stage-in">${avatarSVG(av, { size: 150, walk: true })}</div>
+      <input class="av-name" type="text" maxlength="8" placeholder="이름 (선택)" value="${esc(av.name)}" data-avname enterkeyhint="done">
+    </div>
+    <p class="hint center">지도 위에서 이 캐릭터가 하루 동선을 따라 걸어요. 일정 화면의 <b>▶ 동선 따라가기</b>를 눌러 보세요.</p>
+    <div class="section-title">몸</div>
+    ${opt('body', AVATAR_BODIES, (k) => mini({ body: k, hat: 'none', item: 'none', face: 'dot' }))}
+    <div class="section-title">색</div>
+    <div class="av-opts swatches">${AVATAR_COLORS.map((c) => `<button class="swatch ${av.color === c ? 'on' : ''}" style="--sw:${c}" data-action="av-set" data-field="color" data-value="${c}" aria-label="색 ${c}"></button>`).join('')}</div>
+    <div class="section-title">표정</div>
+    ${opt('face', AVATAR_FACES, (k) => mini({ face: k, hat: 'none', item: 'none' }))}
+    <div class="section-title">모자</div>
+    ${opt('hat', AVATAR_HATS, (k) => mini({ hat: k, item: 'none' }))}
+    <div class="section-title">소지품</div>
+    ${opt('item', AVATAR_ITEMS, (k) => mini({ item: k }))}
+    <div class="row-actions">
+      <button class="btn" data-action="av-random">🎲 랜덤</button>
+      <button class="btn btn-primary" data-action="close-sheet">완료</button>
+    </div>
+  </div>`;
+}
+
+// 지도용 아바타 DOM. 설정이 같으면 같은 요소를 재사용(애니메이션이 끊기지 않도록)
+const avatarElCache = new Map();
+function avatarEl(walk) {
+  const av = myAvatar();
+  const key = JSON.stringify(av);
+  if (!avatarElCache.has(key)) {
+    const el = document.createElement('div');
+    el.className = 'av-marker';
+    el.innerHTML = `${avatarSVG(av, { size: 46 })}${av.name ? `<span class="av-tag">${esc(av.name)}</span>` : ''}`;
+    avatarElCache.set(key, el);
+  }
+  const el = avatarElCache.get(key);
+  // 걷기 상태는 같은 요소에 클래스만 바꾼다(지도 마커를 새로 만들지 않도록)
+  el.classList.toggle('walking', !!walk);
+  el.querySelector('svg')?.classList.toggle('av-walk', !!walk);
+  return el;
+}
+
+// 캐릭터가 서 있을 곳: 재생 중엔 재생 위치, 아니면 고른 장소 → 그날 출발점 → 숙소
+function avatarPos() {
+  const t = S.trip;
+  if (S.tour) return S.tour.pos;
+  if (S.ui.screen === 'plan' && S.ui.day >= 0) {
+    const f = S.ui.focus && findStop(S.ui.focus);
+    if (f && f.di === S.ui.day) return { lat: f.s.lat, lng: f.s.lng };
+    const o = dayOrigin(t, S.ui.day);
+    return o ? { lat: o.lat, lng: o.lng } : null;
+  }
+  const h = t.hotel;
+  return h ? { lat: h.lat, lng: h.lng } : null;
+}
+
+// ---------------------------------------------------------------- 동선 재생(캐릭터가 지도 위를 걷는다)
+function tourPlan(di) {
+  const t = S.trip;
+  const r = computeDay(t, di, seg());
+  if (!r.origin) return null;
+  const pts = [{ lat: r.origin.lat, lng: r.origin.lng }];
+  const cum = [0];
+  const marks = [];
+  const append = (leg, from, to, mark) => {
+    const path = leg?.path?.length > 1 ? leg.path : [from, to];
+    for (const p of path) {
+      const last = pts[pts.length - 1];
+      const d = distKm(last, p);
+      if (d < 0.002) continue;
+      pts.push({ lat: p.lat, lng: p.lng });
+      cum.push(cum[cum.length - 1] + d);
+    }
+    marks.push({ d: cum[cum.length - 1], ...mark });
+  };
+  let prev = r.origin;
+  for (const row of r.rows) {
+    append(row.leg, prev, row.stop, { uid: row.stop.uid, name: row.stop.fixed ? '숙소 · 짐 맡기기' : row.stop.name, time: row.arrive, icon: KIND[row.stop.kind]?.icon || '📍' });
+    prev = row.stop;
+  }
+  const home = dayHotel(t, di);
+  if (r.back && home) append(r.back, prev, home, { name: `${home.name} 복귀`, time: r.end, icon: '🏨' });
+  if (r.dep) append(r.dep.leg, home, r.dep.airport, { name: `${r.dep.airport.name} 도착`, time: r.dep.atAirport, icon: '🛫' });
+  if (!marks.length) return null;
+  const total = cum[cum.length - 1];
+  // 전체 이동 10~18초 + 장소마다 1초 멈춤
+  const moveMs = Math.min(18000, Math.max(10000, total * 900));
+  const steps = [];
+  let from = 0;
+  for (const m of marks) {
+    steps.push({ type: 'move', from, to: m.d, ms: total ? ((m.d - from) / total) * moveMs : 0 });
+    steps.push({ type: 'stop', mark: m, ms: 1000 });
+    from = m.d;
+  }
+  return { di, pts, cum, marks, steps };
+}
+
+function posAt(plan, d) {
+  const { pts, cum } = plan;
+  if (d <= 0) return pts[0];
+  if (d >= cum[cum.length - 1]) return pts[pts.length - 1];
+  let i = 1;
+  while (cum[i] < d) i++;
+  const f = (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+  return { lat: pts[i - 1].lat + (pts[i].lat - pts[i - 1].lat) * f, lng: pts[i - 1].lng + (pts[i].lng - pts[i - 1].lng) * f };
+}
+
+function startTour(di) {
+  const plan = tourPlan(di);
+  if (!plan) return toast('아직 따라갈 동선이 없어요. 장소를 먼저 추가해 보세요');
+  stopTour(false);
+  S.tour = { ...plan, i: 0, t0: performance.now(), pos: plan.pts[0], text: '출발!' };
+  mapView.panTo(plan.pts[0]);
+  renderTourBar();
+  placeAvatar();
+  const tick = (now) => {
+    const tr = S.tour;
+    if (!tr) return;
+    let step = tr.steps[tr.i];
+    let el = now - tr.t0;
+    while (step && el >= step.ms) {
+      el -= step.ms;
+      tr.t0 = now - el;
+      tr.i++;
+      step = tr.steps[tr.i];
+      if (step?.type === 'stop') arriveAt(step.mark);
+    }
+    if (!step) return finishTour();
+    if (step.type === 'move') {
+      const d = step.from + (step.to - step.from) * Math.min(1, el / (step.ms || 1));
+      tr.pos = posAt(tr, d);
+      mapView.moveAvatar(tr.pos);
+      if (!mapView.contains(tr.pos)) mapView.panTo(tr.pos);
+    }
+    tr.raf = requestAnimationFrame(tick);
+  };
+  S.tour.raf = requestAnimationFrame(tick);
+}
+
+function arriveAt(mark) {
+  const tr = S.tour;
+  tr.text = `${fmtTime(mark.time)} ${mark.icon} ${mark.name}`;
+  tr.pos = posAt(tr, mark.d);
+  mapView.moveAvatar(tr.pos);
+  mapView.panTo(tr.pos);
+  renderTourBar();
+  if (mark.uid) {
+    const card = $(`.stop[data-uid="${CSS.escape(mark.uid)}"]`);
+    if (card) {
+      card.classList.remove('flash');
+      void card.offsetWidth;
+      card.classList.add('flash');
+      card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+}
+
+function finishTour() {
+  const tr = S.tour;
+  if (!tr) return;
+  const last = tr.marks[tr.marks.length - 1];
+  const end = posAt(tr, last.d);
+  S.tour = null;
+  S.ui.focus = null;
+  renderTourBar();
+  placeAvatar(end);
+  toast('오늘 동선 끝! 수고했어요 🎉');
+}
+
+function stopTour(repaint = true) {
+  if (!S.tour) return;
+  cancelAnimationFrame(S.tour.raf);
+  S.tour = null;
+  if (repaint) {
+    renderTourBar();
+    placeAvatar();
+  }
+}
+
+function placeAvatar(pos = avatarPos()) {
+  if (!mapView?.map) return;
+  mapView.setAvatar(avatarEl(!!S.tour), pos, () => actions['open-avatar']());
+}
+
+function renderTourBar() {
+  const bar = $('#tourBar');
+  if (!bar) return;
+  const t = S.trip;
+  const di = S.ui.day;
+  const show = S.ui.screen === 'plan' && di >= 0 && t.days[di]?.stops.some((s) => !s.fixed);
+  if (!show) return (bar.innerHTML = '');
+  bar.innerHTML = S.tour
+    ? `<button class="tour-btn on" data-action="tour-stop" aria-label="동선 재생 멈추기"><span class="tour-av">${avatarSVG(myAvatar(), { size: 22, ground: false, walk: true })}</span><span class="tour-txt">${esc(S.tour.text)}</span><b>■</b></button>`
+    : `<button class="tour-btn" data-action="tour-play" aria-label="캐릭터가 오늘 동선을 따라갑니다"><span class="tour-av">${avatarSVG(myAvatar(), { size: 22, ground: false })}</span>▶ 동선 따라가기</button>`;
+}
+
 function settingsHTML() {
   return `
   <div class="sheet-head"><b>설정</b><button class="icon-btn" data-action="close-sheet" aria-label="닫기">${ICON.close}</button></div>
@@ -1268,6 +1487,7 @@ function renderMap(opts = {}) {
   }
 
   mapView.draw({ markers, lines });
+  placeAvatar();
   const key = `${S.ui.screen}|${S.ui.step}|${S.ui.day}|${fitPts.length}|${S.ui.sheet?.type === 'rec' ? S.ui.sheet.results.length : 0}`;
   if (opts.fit || key !== lastFit) {
     lastFit = key;
@@ -2110,6 +2330,20 @@ const actions = {
     S.ui.focus = null;
     render();
   },
+  'open-avatar': () => {
+    S.ui.sheet = { type: 'avatar', resetScroll: true };
+    render();
+  },
+  'av-set': (d) => {
+    setAvatar({ [d.field]: d.value });
+    render();
+  },
+  'av-random': () => {
+    setAvatar(randomAvatar(myAvatar().name));
+    render();
+  },
+  'tour-play': () => startTour(S.ui.day),
+  'tour-stop': () => stopTour(),
   'open-settings': () => {
     S.ui.editKey = false;
     S.ui.sheet = { type: 'settings', resetScroll: true };
@@ -2215,6 +2449,11 @@ function onClick(e) {
 
 function onChange(e) {
   const el = e.target;
+  if (el.matches('[data-avname]')) {
+    setAvatar({ name: el.value.trim() });
+    placeAvatar();
+    return;
+  }
   if (el.matches('[data-field]')) {
     let v = el.type === 'checkbox' ? el.checked : el.value;
     if (v === '') return render();
@@ -2326,6 +2565,7 @@ function mount() {
       <div id="map" aria-label="여행 지도"></div>
       <div id="modeBadge" class="mode-badge"></div>
       <button class="map-toggle" data-action="toggle-map" aria-label="지도 크게 보기">${ICON.expand}</button>
+      <div id="tourBar" class="tour-bar"></div>
     </div>
     <div class="panel-wrap">
       <main id="panel" class="panel"></main>
