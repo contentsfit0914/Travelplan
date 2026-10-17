@@ -53,6 +53,10 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; font-weight: 800; line
 .muted { color: var(--muted); }
 .small { font-size: 12.5px; }
 .center { text-align: center; }
+.ic { display: inline-block; vertical-align: -0.22em; object-fit: contain; flex: none; }
+.r-name .ic, .tabs .ic, .btn .ic, .seg .ic, .fc-head .ic { vertical-align: -0.25em; margin-right: 1px; }
+.pin .ic, .stop-num .ic, .a-ico .ic, .gap-ico .ic, .sb-thumb .ic, .thumb.ph .ic, .pin-inline .ic { vertical-align: middle; }
+.pin-hotel.multi span .ic { margin-right: 1px; }
 .num-font, .stop-time, .a-time, .cap-txt, .gap .stop-time, .tour-txt { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 
 /* ---------- 레이아웃 */
@@ -481,7 +485,8 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; font-weight: 800; line
 .pin-hotel.multi { background: var(--c); color: #fff; width: auto; min-width: 34px; padding: 0 6px; }
 .pin-hotel.multi span { display: flex; align-items: center; gap: 2px; }
 .pin-hotel.multi b { font-size: 13px; }
-.pin-cand { background: #fff; color: var(--ink); border-color: var(--ink); font-size: 12px; min-width: 26px; height: 26px; padding: 0 3px; box-shadow: none; }
+.pin-cand { background: #fff; color: var(--ink); border-color: var(--ink); font-size: 12px; min-width: 28px; height: 28px; padding: 0 3px; box-shadow: none; }
+.pin-cand .ic { width: 20px; height: 20px; }
 .pin-cand.is-active { background: var(--primary); }
 .pin.food, .pin.cafe { border-radius: 8px; }
 .pin.airport { background: var(--accent); color: #fff; }

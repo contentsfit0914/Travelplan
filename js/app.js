@@ -57,6 +57,12 @@ import { QUICK_SPOTS, DEMO_PLACES } from './data/demo-places.js';
 
 const CFG = window.TRAVELPLAN_CONFIG || {};
 const DAY_COLORS = ["#FF4F3A", "#2F6BFF", "#15A36A", "#8A4DFF", "#F2A20C", "#E8457B", "#1FA2A0", "#5B6B7A", "#7C5CFF", "#C9770A"];
+// 아이콘 이미지(assets/icons): 카메라·택시·버스·침대·비행기·커피·맥주·오믈렛
+const ICON_IMG = { sight: 'camera', food: 'food', bar: 'beer', cafe: 'coffee', hotel: 'bed', airport: 'plane', DRIVE: 'taxi', TRANSIT: 'bus' };
+const icon = (name, size = 20, cls = '') => (ICON_IMG[name] ? `<img class="ic ${cls}" src="assets/icons/${ICON_IMG[name]}.png" width="${size}" height="${size}" alt="" aria-hidden="true">` : '');
+// 술집·이자카야는 맥주 아이콘
+const isBar = (p) => (p?.types || []).some((t) => ['bar', 'pub', 'wine_bar', 'izakaya_restaurant', 'night_club'].includes(t)) || /이자카야|술집|주점|바$|펍/.test(p?.typeLabel || '');
+const placeIcon = (p, size = 20, cls = '') => icon(p?.kind === 'food' && isBar(p) ? 'bar' : p?.kind || 'sight', size, cls);
 const KIND = {
   sight: { icon: '📍', label: '관광' },
   food: { icon: '🍜', label: '맛집' },
@@ -380,7 +386,7 @@ function flightCard(kind) {
   const f = t[kind];
   const arr = kind === 'arrival';
   return `<div class="card flight-card">
-    <div class="fc-head">${arr ? '🛬 도쿄 도착' : '🛫 도쿄 출발'}</div>
+    <div class="fc-head">${icon('airport', 22)} ${arr ? '도쿄 도착' : '도쿄 출발'}</div>
     <div class="row2">
       <div class="field"><label for="${kind}-date">${arr ? '도착 날짜' : '출발 날짜'}</label><input id="${kind}-date" type="date" data-field="${kind}.date" value="${f.date}"></div>
       <div class="field"><label for="${kind}-time">${arr ? '도착 시간' : '출발 시간'}</label><input id="${kind}-time" type="time" data-field="${kind}.time" value="${f.time}" step="300"></div>
@@ -423,7 +429,7 @@ function setupStep1() {
   </div>
   <div class="field">
     <label>기본 이동수단</label>
-    ${seg3('baseMode', [['TRANSIT', '🚇 대중교통 위주'], ['DRIVE', '🚕 택시 위주']], t.baseMode)}
+    ${seg3('baseMode', [['TRANSIT', `${icon('TRANSIT', 18)} 대중교통 위주`], ['DRIVE', `${icon('DRIVE', 18)} 택시 위주`]], t.baseMode)}
     <p class="hint">도보 최대 거리 안은 자동으로 걸어서 계산해요. 공항 이동을 포함해 구간마다 따로 바꿀 수 있어요.</p>
   </div>
   <div class="field">
@@ -443,7 +449,7 @@ function resultsHTML(kindTarget) {
       const added = kindTarget === 'hotel' ? S.trip.hotels.some((h) => h.id === p.id) : S.trip.mustSpots.some((m) => m.id === p.id);
       return `<li class="result">
         <div class="r-main">
-          <div class="r-name">${KIND[p.kind]?.icon || '📍'} ${esc(p.name)}</div>
+          <div class="r-name">${placeIcon(p, 18)} ${esc(p.name)}</div>
           <div class="r-meta">${ratingHTML(p)} ${placeMeta(p)}</div>
           <div class="r-addr">${esc(p.address)}</div>
         </div>
@@ -598,7 +604,7 @@ function setupStep3() {
           .map(
             (m, i) => `<li>
           <span class="num">${i + 1}</span>
-          <div class="r-main"><div class="r-name">${KIND[m.kind]?.icon || '📍'} ${esc(m.name)}</div><div class="r-meta">${placeMeta(m)}</div></div>
+          <div class="r-main"><div class="r-name">${placeIcon(m, 18)} ${esc(m.name)}</div><div class="r-meta">${placeMeta(m)}</div></div>
           <div class="stay mini">
             <button data-action="must-stay" data-i="${i}" data-d="-15" aria-label="체류시간 줄이기">−</button>
             <span>${fmtDur(m.stay)}</span>
@@ -705,7 +711,7 @@ function staysHTML() {
   const t = S.trip;
   const ranges = stayRanges(t);
   if (ranges.length === 1)
-    return `<div class="card hotel-card slim"><div class="pin-inline">🏨</div><div><b>${esc(t.hotel.name)}</b><div class="muted">매일 출발·복귀 기준</div></div></div>`;
+    return `<div class="card hotel-card slim"><div class="pin-inline">${icon('hotel', 28)}</div><div><b>${esc(t.hotel.name)}</b><div class="muted">매일 출발·복귀 기준</div></div></div>`;
   return `<div class="card hotel-card slim stays">${ranges
     .map(
       (r) => `<div class="stay-row" style="--hc:${hotelColor(t, r.hotel.id)}"><span class="h-num">${hotelNo(t, r.hotel.id)}</span><div><b>${esc(r.hotel.name)}</b><div class="muted">${dayLabel(t, r.from)} ~ ${dayLabel(t, r.to)} · ${r.to - r.from}박</div></div></div>`,
@@ -721,7 +727,7 @@ function overviewHTML() {
     ${t.days
       .map((d, i) => {
         const r = computeDay(t, i, s);
-        const warn = r.overflow ? `<span class="warn-pill">⚠ ${fmtDur(r.overflow)} 초과</span>` : r.gaps.length ? `<span class="gap-pill">🍽 ${r.gaps.map((g) => g.label).join('·')} 미정</span>` : `<span class="ok-pill">여유 ${fmtDur(r.free)}</span>`;
+        const warn = r.overflow ? `<span class="warn-pill">⚠ ${fmtDur(r.overflow)} 초과</span>` : r.gaps.length ? `<span class="gap-pill">${icon('food', 14)} ${r.gaps.map((g) => g.label).join('·')} 미정</span>` : `<span class="ok-pill">여유 ${fmtDur(r.free)}</span>`;
         return `<button class="day-card" style="--c:${color(i)}" data-action="day" data-day="${i}">
           <div class="dc-head"><b>D${i + 1}</b> <span>${dayLabel(t, i)}</span> <span class="muted">${i === 0 ? `✈ ${t.arrival.time} 도착` : r.dep ? `✈ ${t.departure.time} 출발` : `${fmtTime(r.win.start)}–${fmtTime(Math.max(r.end, r.win.start))}`}</span>${isMoveDay(t, i) ? ' <span class="gap-pill">🧳 숙소 이동</span>' : ''} ${warn}</div>
           <div class="dc-stops">${r.rows.some((x) => x.num) ? r.rows.filter((x) => x.num).map((x) => `<span><i>${x.num}</i>${esc(x.stop.name)}</span>`).join('') : '<span class="muted">비어 있음 — 눌러서 채우기</span>'}</div>
@@ -732,14 +738,16 @@ function overviewHTML() {
   </section>`;
 }
 
+// 이동수단 아이콘: 택시·버스는 이미지, 도보는 이모지
+const modeIcon = (mode) => (ICON_IMG[mode] ? icon(mode, 16) : MODES[mode].icon);
 function modeLabel(leg, pref) {
   const m = MODES[leg.mode];
-  return `${m.icon} ${m.label} ${leg.min ? fmtDur(leg.min) : '바로 옆'}${pref === 'AUTO' || !pref ? '' : ' ·고정'}`;
+  return `${modeIcon(leg.mode)} ${m.label} ${leg.min ? fmtDur(leg.min) : '바로 옆'}${pref === 'AUTO' || !pref ? '' : ' ·고정'}`;
 }
 
 function legHTML(leg, from, to, ref, pref, di, compact = false) {
   if (!leg) return '';
-  if (compact) return `<div class="leg compact" style="--c:${color(di)}"><span>${MODES[leg.mode].icon} ${leg.min ? fmtDur(leg.min) : '바로 옆'}</span></div>`;
+  if (compact) return `<div class="leg compact" style="--c:${color(di)}"><span>${modeIcon(leg.mode)} ${leg.min ? fmtDur(leg.min) : '바로 옆'}</span></div>`;
   const lines = (leg.lines || [])
     .map((l) => `<span class="line-chip" style="${cssColor(l.color) ? `--lc:${cssColor(l.color)}` : ''}" title="${esc(l.from)} → ${esc(l.to)} (${l.stops}정거장)">${esc(l.name)}</span>`)
     .join('');
@@ -761,7 +769,7 @@ function anchorName(a) {
 function gapHTML(g) {
   const late = g.dev === 0 ? '목표 시각' : `목표보다 ${fmtDur(Math.abs(g.dev))} ${g.dev > 0 ? '늦음' : '빠름'}`;
   return `<div class="gap">
-    <div class="gap-ico">🍽</div>
+    <div class="gap-ico">${icon('food', 18)}</div>
     <div class="gap-card">
       <button class="gap-main" data-action="open-rec" data-tab="food" data-gap="${g.type}">
         <span class="when">${fmtTime(g.at)} · ${g.label}</span>
@@ -799,10 +807,10 @@ function stopHTML(row, di, edit = false, day = null) {
   const classes = ['stop', S.ui.focus === s.uid ? 'is-active' : '', s.fixed ? 'is-fixed' : '', edit ? 'is-edit' : '', S.ui.flash === s.uid ? 'flash' : ''].join(' ');
   const name = s.fixed === 'arrival' ? '숙소 도착 · 짐 풀고 쉬기' : s.fixed === 'move' ? '숙소 이동 · 짐 맡기기' : esc(s.name);
   const meta = s.fixed ? esc(s.name) : `${s.must ? '<em class="badge">메인</em>' : ''}${s.meal ? `<em class="badge meal">${MEAL_LABEL[s.meal]}</em>` : ''}${ratingHTML(s)} ${placeMeta(s)}`;
-  const head = `<div class="stop-num">${row.num ?? '🏨'}</div>`;
+  const head = `<div class="stop-num">${row.num ?? icon('hotel', 18)}</div>`;
   const when = `<span class="when">${fmtTime(row.arrive)} – ${fmtTime(row.depart)}<small> · ${fmtDur(s.stay)}</small></span>`;
   const photo = s.fixed ? null : photoOf(s);
-  const thumb = `<span class="sb-thumb ${photo ? '' : 'ph'}">${photo ? `<img src="${esc(photo)}" alt="" loading="lazy">` : s.fixed ? '🏨' : KIND[s.kind]?.icon || '📍'}</span>`;
+  const thumb = `<span class="sb-thumb ${photo ? '' : 'ph'}">${photo ? `<img src="${esc(photo)}" alt="" loading="lazy">` : s.fixed ? icon('hotel', 38) : placeIcon(s, 38)}</span>`;
   if (!edit) {
     const quick = S.ui.quick === s.uid;
     const mv = quick ? moveability(day, row.index) : null;
@@ -874,7 +882,7 @@ function dayHTML(di) {
   // 타임라인 조립
   const parts = [];
   if (r.win.isArrival && t.arrival) {
-    parts.push(anchorHTML(r.win.start, '🛬', `${esc(r.origin.name)} 출발`, `${t.arrival.time} 도착${t.immigrationMin ? ` + 입국 수속 ${fmtDur(t.immigrationMin)}` : ''}`));
+    parts.push(anchorHTML(r.win.start, icon('airport', 18), `${esc(r.origin.name)} 출발`, `${t.arrival.time} 도착${t.immigrationMin ? ` + 입국 수속 ${fmtDur(t.immigrationMin)}` : ''}`));
   } else if (r.origin && (r.rows.length || !r.dep)) {
     // 첫 장소가 식사라 기다려야 하면 그만큼 늦게 출발
     const lateStart = r.rows[0]?.wait || 0;
@@ -885,7 +893,7 @@ function dayHTML(di) {
         : lateStart
           ? `${fmtTime(r.win.start)}부터 ${fmtDur(lateStart)} 여유`
           : '';
-    parts.push(anchorHTML(r.win.start + lateStart, '🏨', `${esc(r.origin.name)} 출발`, sub));
+    parts.push(anchorHTML(r.win.start + lateStart, icon('hotel', 18), `${esc(r.origin.name)} 출발`, sub));
   }
   let prev = r.origin;
   let free = r.win.start;
@@ -914,13 +922,13 @@ function dayHTML(di) {
   if (home && r.back)
     parts.push(
       openTail
-        ? anchorHTML(r.win.rawEnd, '🏨', `${backLabel} 목표`, `지금 일정대로면 ${fmtTime(r.end)} 복귀`, 'end')
-        : anchorHTML(r.end, '🏨', backLabel, r.overflow ? `${r.dep ? '공항 출발' : '목표'} ${fmtTime(r.win.rawEnd)}보다 ${fmtDur(r.overflow)} 늦어요` : '', `end ${r.overflow ? 'over' : ''}`),
+        ? anchorHTML(r.win.rawEnd, icon('hotel', 18), `${backLabel} 목표`, `지금 일정대로면 ${fmtTime(r.end)} 복귀`, 'end')
+        : anchorHTML(r.end, icon('hotel', 18), backLabel, r.overflow ? `${r.dep ? '공항 출발' : '목표'} ${fmtTime(r.win.rawEnd)}보다 ${fmtDur(r.overflow)} 늦어요` : '', `end ${r.overflow ? 'over' : ''}`),
     );
   if (r.dep) {
     parts.push(anchorHTML(r.dep.leaveBy, '🧳', '공항으로 출발', '늦어도 이 시각에는 숙소를 나서야 해요', 'end'));
     parts.push(legHTML(r.dep.leg, r.dep.hotel, r.dep.airport, 'airout', t.departure.mode, di, edit));
-    parts.push(anchorHTML(r.dep.atAirport, '🛫', `${esc(r.dep.airport.name)} 도착`, `이륙 ${t.departure.time} · ${fmtDur(t.airportBufferMin)} 전`, 'end'));
+    parts.push(anchorHTML(r.dep.atAirport, icon('airport', 18), `${esc(r.dep.airport.name)} 도착`, `이륙 ${t.departure.time} · ${fmtDur(t.airportBufferMin)} 전`, 'end'));
   }
 
   const flow = [
@@ -1002,8 +1010,8 @@ function anchorOptions(sh) {
   const day = t.days[S.ui.day];
   const opts = [['route', '동선 전체']];
   if (S.ui.day === 0 && t.arrival) opts.push(['origin', `✈ ${AIRPORTS[t.arrival.airport].name}`]);
-  if (isMoveDay(t, S.ui.day)) opts.push(['origin', '🏨 전날 숙소']);
-  if (t.hotel) opts.push(['hotel', isMoveDay(t, S.ui.day) ? '🏨 새 숙소' : '🏨 숙소']);
+  if (isMoveDay(t, S.ui.day)) opts.push(['origin', '전날 숙소']);
+  if (t.hotel) opts.push(['hotel', isMoveDay(t, S.ui.day) ? '새 숙소' : '숙소']);
   let n = 0;
   day.stops.forEach((s) => !s.fixed && opts.push([s.uid, `${++n}. ${s.name}`]));
   return `<div class="chips scroll">${opts
@@ -1013,14 +1021,14 @@ function anchorOptions(sh) {
 
 function recHTML(sh) {
   const tabs = [
-    ['sight', '🏛 가볼만한 곳'],
-    ['food', '🍜 맛집'],
-    ['cafe', '☕ 카페'],
+    ['sight', `${icon('sight', 18)} 가볼만한 곳`],
+    ['food', `${icon('food', 18)} 맛집`],
+    ['cafe', `${icon('cafe', 18)} 카페`],
     ['search', '🔍 검색'],
   ];
   const kw = sh.tab === 'food' ? FOOD_KEYWORDS : sh.tab === 'cafe' ? CAFE_KEYWORDS : [];
   const gapNote = sh.gap
-    ? `<div class="banner slim">🍽 <b>${MEAL_LABEL[sh.gap]} ${sh.gapAt != null ? fmtTime(sh.gapAt) : ''}</b> 자리 · ${esc(sh.anchorName || '')}에서 <b>${budgetLabel(sh.budget)}</b> 맛집을 보여 드려요. 고르면 그 시간에 바로 들어가요.${sh.note ? `<br>${esc(sh.note)}` : ''}</div>`
+    ? `<div class="banner slim">${icon('food', 16)} <b>${MEAL_LABEL[sh.gap]} ${sh.gapAt != null ? fmtTime(sh.gapAt) : ''}</b> 자리 · ${esc(sh.anchorName || '')}에서 <b>${budgetLabel(sh.budget)}</b> 맛집을 보여 드려요. 고르면 그 시간에 바로 들어가요.${sh.note ? `<br>${esc(sh.note)}` : ''}</div>`
     : '';
   let list;
   if (sh.loading) list = `<div class="empty"><span class="spinner"></span> ${isDemo() ? '샘플에서 찾는 중…' : 'Google 지도에서 찾는 중…'}</div>`;
@@ -1062,7 +1070,7 @@ function recItemHTML(p, sh) {
   const focus = S.ui.focus === `cand:${p.id}`;
   const detour = p.reachLabel || (p.extra <= 2 ? '동선에서 거의 안 벗어나요' : `이동 +${p.extra}분`);
   return `<li class="rec ${focus ? 'is-active' : ''}" id="${candDomId(p.id)}">
-    ${photoOf(p) ? `<div class="thumb"><img src="${esc(photoOf(p))}" alt="" loading="lazy">${p.photoAttr ? `<small>${esc(p.photoAttr)}</small>` : ''}</div>` : `<div class="thumb ph">${KIND[p.kind]?.icon || '📍'}</div>`}
+    ${photoOf(p) ? `<div class="thumb"><img src="${esc(photoOf(p))}" alt="" loading="lazy">${p.photoAttr ? `<small>${esc(p.photoAttr)}</small>` : ''}</div>` : `<div class="thumb ph">${placeIcon(p, 44)}</div>`}
     <button class="rec-main" data-action="focus-cand" data-id="${esc(p.id)}">
       <span class="r-name">${esc(p.name)}</span>
       <span class="r-meta">${ratingHTML(p)} ${placeMeta(p)}</span>
@@ -1133,8 +1141,8 @@ function stopSheetHTML(sh) {
         .join('')}</div>
     </div>
     <div class="row-actions">
-      <button class="btn" data-action="open-rec" data-tab="food" data-anchor="${s.uid}">🍜 근처 맛집</button>
-      <button class="btn" data-action="open-rec" data-tab="cafe" data-anchor="${s.uid}">☕ 근처 카페</button>
+      <button class="btn" data-action="open-rec" data-tab="food" data-anchor="${s.uid}">${icon('food', 18)} 근처 맛집</button>
+      <button class="btn" data-action="open-rec" data-tab="cafe" data-anchor="${s.uid}">${icon('cafe', 18)} 근처 카페</button>
       <a class="btn" href="${esc(placeUrl(s))}" target="_blank" rel="noopener">Google 지도 ↗</a>
     </div>
     <button class="btn btn-danger wide" data-action="remove-stop" data-uid="${esc(s.uid)}">일정에서 삭제</button>
@@ -1148,7 +1156,7 @@ function arrivalSheetHTML(s, di, modes) {
   const move = s.fixed === 'move';
   return `
   <div class="sheet-head">
-    <div class="sh-title"><span class="stop-num" style="--c:${color(di)}">🏨</span><b>${move ? '숙소 이동 · 짐 맡기기' : '숙소 도착 · 짐 풀고 쉬기'}</b></div>
+    <div class="sh-title"><span class="stop-num" style="--c:${color(di)}">${icon('hotel', 18)}</span><b>${move ? '숙소 이동 · 짐 맡기기' : '숙소 도착 · 짐 풀고 쉬기'}</b></div>
     <button class="icon-btn" data-action="close-sheet" aria-label="닫기">${ICON.close}</button>
   </div>
   <div class="sheet-body">
@@ -1345,12 +1353,12 @@ function tourPlan(di) {
   };
   let prev = r.origin;
   for (const row of r.rows) {
-    append(row.leg, prev, row.stop, { uid: row.stop.uid, kind: row.stop.kind, name: row.stop.fixed ? '숙소 · 짐 맡기기' : row.stop.name, time: row.arrive, icon: KIND[row.stop.kind]?.icon || '📍' });
+    append(row.leg, prev, row.stop, { uid: row.stop.uid, kind: row.stop.kind, name: row.stop.fixed ? '숙소 · 짐 맡기기' : row.stop.name, time: row.arrive, icon: row.stop.fixed ? icon('hotel', 16) : placeIcon(row.stop, 16) });
     prev = row.stop;
   }
   const home = dayHotel(t, di);
-  if (r.back && home) append(r.back, prev, home, { name: `${home.name} 복귀`, time: r.end, icon: '🏨' });
-  if (r.dep) append(r.dep.leg, home, r.dep.airport, { name: `${r.dep.airport.name} 도착`, time: r.dep.atAirport, icon: '🛫' });
+  if (r.back && home) append(r.back, prev, home, { name: `${home.name} 복귀`, time: r.end, icon: icon('hotel', 16) });
+  if (r.dep) append(r.dep.leg, home, r.dep.airport, { name: `${r.dep.airport.name} 도착`, time: r.dep.atAirport, icon: icon('airport', 16) });
   if (!marks.length) return null;
   const total = cum[cum.length - 1];
   // 전체 이동 10~18초 + 장소마다 1초 멈춤
@@ -1532,13 +1540,13 @@ function renderMap(opts = {}) {
     if (!h || h.kind === 'airport' || hotelIds.has(h.id)) continue;
     hotelIds.add(h.id);
     const multi = t.hotels.length > 1;
-    markers.push({ lat: h.lat, lng: h.lng, label: multi ? `🏨<b>${hotelNo(t, h.id)}</b>` : '🏨', style: multi ? 'hotel multi' : 'hotel', color: multi ? hotelColor(t, h.id) : null, title: h.name, z: 20 });
+    markers.push({ lat: h.lat, lng: h.lng, label: multi ? `${icon('hotel', 20)}<b>${hotelNo(t, h.id)}</b>` : icon('hotel', 22), style: multi ? 'hotel multi' : 'hotel', color: multi ? hotelColor(t, h.id) : null, title: h.name, z: 20 });
     fitPts.push(h);
   }
 
   const airportMarker = (code, title) => {
     const a = airportPoint(code);
-    markers.push({ lat: a.lat, lng: a.lng, label: '✈', style: 'hotel airport', title, z: 20 });
+    markers.push({ lat: a.lat, lng: a.lng, label: icon('airport', 22), style: 'hotel airport', title, z: 20 });
     fitPts.push(a);
   };
   if (S.ui.screen === 'setup') {
@@ -1555,7 +1563,7 @@ function renderMap(opts = {}) {
         markers.push({
           lat: p.lat,
           lng: p.lng,
-          label: KIND[p.kind]?.icon || '📍',
+          label: placeIcon(p, 18),
           style: 'cand',
           title: p.name,
           z: 15,
@@ -1607,7 +1615,7 @@ function renderMap(opts = {}) {
         markers.push({
           lat: p.lat,
           lng: p.lng,
-          label: KIND[p.kind]?.icon || '📍',
+          label: placeIcon(p, 18),
           style: 'cand',
           active,
           title: p.name,
