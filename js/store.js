@@ -222,7 +222,15 @@ export function sanitizeTrip(raw) {
   const hotelOf = (h) => {
     const c = cleanPlace(h);
     if (!c) return null;
-    return { ...c, kind: 'hotel', checkIn: TIME_RE.test(h.checkIn) ? h.checkIn : time('checkIn'), checkOut: TIME_RE.test(h.checkOut) ? h.checkOut : time('checkOut') };
+    return {
+      ...c,
+      kind: 'hotel',
+      checkIn: TIME_RE.test(h.checkIn) ? h.checkIn : time('checkIn'),
+      checkOut: TIME_RE.test(h.checkOut) ? h.checkOut : time('checkOut'),
+      timesChecked: !!h.timesChecked, // 사용자가 체크인·체크아웃 시간을 확인했는지
+      website: safeUrl(h.website),
+      phone: str(h.phone, 40),
+    };
   };
   let hotels = Array.isArray(t.hotels) ? t.hotels.slice(0, 9).map(hotelOf).filter(Boolean) : [];
   if (!hotels.length && t.hotel) hotels = [hotelOf(t.hotel)].filter(Boolean);

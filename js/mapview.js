@@ -38,7 +38,7 @@ export class MapView {
         clickableIcons: false,
         disableDoubleClickZoom: true, // 더블 탭은 '전체 보기'로 쓴다
       });
-      this.map.addListener('dblclick', () => this.onDblClick?.());
+      this.map.addListener?.('dblclick', () => this.onDblClick?.());
     } else {
       this.map = window.L.map(this.el, { zoomControl: true, doubleClickZoom: false }).setView([TOKYO.lat, TOKYO.lng], 12);
       this.map.on('dblclick', () => this.onDblClick?.());

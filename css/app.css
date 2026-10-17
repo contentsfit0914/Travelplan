@@ -708,6 +708,10 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; font-weight: 800; line
 .add-hotel .searchbox { margin-top: 10px; }
 .btn.dashed { border-style: dashed; border-color: var(--line-strong); background: transparent; color: var(--ink2); }
 .btn.dashed .muted { font-weight: 500; font-size: 12.5px; margin-left: 2px; }
+.verify-box { margin: 4px 0 10px; padding: 10px 12px; border-radius: 12px; background: var(--warn-soft); border: 1.5px solid #f0cd86; }
+.verify-box p { margin: 0; font-size: 12.5px; color: #7a4b00; line-height: 1.5; }
+.verify-box .row-actions { margin: 8px 0 0; }
+.verify-box .btn { flex: 0 1 auto; }
 .stays { flex-direction: column; align-items: stretch; gap: 8px; }
 .stay-row { display: flex; gap: 10px; align-items: center; }
 

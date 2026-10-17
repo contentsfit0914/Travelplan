@@ -495,7 +495,43 @@ function hotelCardHTML(h, i) {
       ${timeField('체크인', `hotels.${i}.checkIn`)}
       ${timeField('체크아웃', `hotels.${i}.checkOut`)}
     </div>
+    ${
+      h.timesChecked
+        ? ''
+        : `<div class="verify-box">
+      <p>${S.ui.hotelInfoBusy === h.id ? '<span class="spinner sm"></span> 숙소 정보를 확인하는 중…' : '⚠ 체크인·체크아웃 시간은 Google 지도에서 제공하지 않아요. 위 시간은 일반적인 기본값이니 <b>예약 확인서나 호텔 안내</b>에서 확인해 맞춰 주세요.'}</p>
+      <div class="row-actions">
+        ${safeUrl(h.website) ? `<a class="btn btn-sm" href="${esc(safeUrl(h.website))}" target="_blank" rel="noopener">호텔 홈페이지 ↗</a>` : ''}
+        ${h.phone ? `<a class="btn btn-sm" href="tel:${esc(h.phone.replace(/[^\d+]/g, ''))}">📞 ${esc(h.phone)}</a>` : ''}
+        ${safeUrl(h.mapsUrl) ? `<a class="btn btn-sm" href="${esc(safeUrl(h.mapsUrl))}" target="_blank" rel="noopener">Google 지도 ↗</a>` : ''}
+        <button class="btn btn-sm" data-action="hotel-times-ok" data-id="${esc(h.id)}">시간 확인했어요 ✓</button>
+      </div>
+    </div>`
+    }
   </div>`;
+}
+
+// 숙소 등록 직후: Google 상세에서 홈페이지·전화번호를 가져와 시간 확인에 쓰도록 붙여 둔다
+async function fetchHotelInfo(id) {
+  if (isDemo()) return;
+  S.ui.hotelInfoBusy = id;
+  render();
+  try {
+    const d = await S.provider.details(id);
+    const h = S.trip.hotels.find((x) => x.id === id);
+    if (h) {
+      if (safeUrl(d.website)) h.website = d.website;
+      if (d.phone) h.phone = d.phone;
+      if (d.checkIn) h.checkIn = d.checkIn; // 공급자가 체크인·체크아웃 시간을 주면 채운다(현재 Google은 제공하지 않음)
+      if (d.checkOut) h.checkOut = d.checkOut;
+      if (d.checkIn && d.checkOut) h.timesChecked = true;
+      save();
+    }
+  } catch {
+    /* 상세 정보를 못 가져와도 등록은 유지 */
+  }
+  S.ui.hotelInfoBusy = null;
+  render();
 }
 
 function setupStep2() {
@@ -2215,7 +2251,7 @@ const actions = {
     if (!p || t.hotels.some((h) => h.id === p.id)) return;
     if (t.hotels.length >= 6) return toast('숙소는 6곳까지 등록할 수 있어요');
     const first = !t.hotels.length;
-    t.hotels.push({ ...p, kind: 'hotel', checkIn: t.checkIn, checkOut: t.checkOut });
+    t.hotels.push({ ...p, kind: 'hotel', checkIn: t.checkIn, checkOut: t.checkOut, timesChecked: false });
     // 첫 숙소는 모든 밤에, 추가 숙소는 마지막 밤에 우선 배정(날짜 칸을 눌러 바꾼다)
     if (first) t.nightHotel = [];
     else t.nightHotel[t.nightHotel.length - 1] = p.id;
@@ -2224,6 +2260,14 @@ const actions = {
     save();
     render({ fit: true });
     toast(first ? `숙소 등록: ${p.name}` : `${p.name} 등록 · 마지막 밤에 넣었어요. 날짜를 눌러 바꿀 수 있어요`);
+    fetchHotelInfo(p.id);
+  },
+  'hotel-times-ok': (d) => {
+    const h = S.trip.hotels.find((x) => x.id === d.id);
+    if (!h) return;
+    h.timesChecked = true;
+    save();
+    render();
   },
   'add-hotel': (d) => {
     S.ui.addHotel = d.v === '1';
@@ -2658,6 +2702,9 @@ function onChange(e) {
     if (el.dataset.type === 'bool-inv') v = !v;
     else if (NUM_FIELDS.includes(el.dataset.field)) v = Number(v);
     setPath(S.trip, el.dataset.field, v);
+    // 숙소 체크인·체크아웃을 직접 고치면 '확인함'으로 본다
+    const m = el.dataset.field.match(/^hotels\.(\d+)\.(checkIn|checkOut)$/);
+    if (m && S.trip.hotels[Number(m[1])]) S.trip.hotels[Number(m[1])].timesChecked = true;
     save();
     render();
   } else if (el.matches('[data-import]')) {
