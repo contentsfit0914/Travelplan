@@ -503,6 +503,16 @@ function assignMeals(trip, foods, out) {
   return rest; // 남는 식사 자리가 없으면 일반 장소로 배치
 }
 
+// 마지막 날(귀국일)에 넣을 수 있는 스팟: 짐을 맡긴 숙소에서 30분 안에 가고, 짧게 머무는 곳(산책·쇼핑)
+export const LAST_DAY_REACH_MIN = 30;
+export const LAST_DAY_MAX_STAY = 120;
+export function okOnLastDay(trip, s, est = estimator(trip)) {
+  const last = trip.days.length - 1;
+  const h = dayHotel(trip, last);
+  if (!h) return false;
+  return est(h, s) <= LAST_DAY_REACH_MIN && (s.stay || 60) <= LAST_DAY_MAX_STAY;
+}
+
 export function autoDistribute(trip, spots) {
   const n = trip.days.length;
   const out = Array.from({ length: n }, () => []);
@@ -511,6 +521,7 @@ export function autoDistribute(trip, spots) {
   const foods = spots.filter((s) => s.kind === 'food');
   spots = spots.filter((s) => s.kind !== 'food');
   const est = estimator(trip);
+  const last = n - 1;
   const caps = Array.from({ length: n }, (_, i) => dayCapacity(trip, i));
   // 하루 부담: 체류 + 그날 숙소에서 출발·복귀하는 이동
   const load = (list, di) => {
@@ -519,54 +530,95 @@ export function autoDistribute(trip, spots) {
     const order = optimizeOrder(list, h, est);
     return list.reduce((s, p) => s + p.stay, 0) + tourCost(order, h, est);
   };
+  const allowed = (s, di) => di !== last || okOnLastDay(trip, s, est);
 
-  const k = Math.min(n, spots.length);
-  const clusters = spots.length ? kmeans(spots, k).filter((c) => c.length) : [];
-  // 스팟이 적어 한 곳씩 흩어진 경우: 3km 안의 묶음은 하루 용량이 허락하면 합친다
-  const maxCap = Math.max(...caps);
-  const bestDay = caps.indexOf(maxCap);
-  for (let merged = true; merged; ) {
-    merged = false;
-    let best = null;
-    for (let i = 0; i < clusters.length; i++)
-      for (let j = i + 1; j < clusters.length; j++) {
-        const d = distKm(centroid(clusters[i]), centroid(clusters[j]));
-        if (d < 3 && load([...clusters[i], ...clusters[j]], bestDay) <= maxCap && (!best || d < best.d)) best = { i, j, d };
-      }
-    if (best) {
-      clusters[best.i].push(...clusters[best.j]);
-      clusters.splice(best.j, 1);
-      merged = true;
-    }
+  // 1) 숙소별 체류 구간: 같은 숙소에서 출발·복귀하는 날들을 묶는다
+  const segs = [];
+  for (let di = 0; di < n; di++) {
+    const h = dayHotel(trip, di);
+    const key = h ? h.id : 'none';
+    const cur = segs[segs.length - 1];
+    if (cur && cur.key === key) cur.days.push(di);
+    else segs.push({ key, hotel: h, days: [di], spots: [] });
   }
-  // 큰 묶음부터 '넘치는 시간 + 그날 숙소와의 거리'가 가장 작은 날에 놓는다(숙소가 하나면 여유 많은 날 순)
-  const dayIdx = caps.map((c, i) => [c, i]).sort((a, b) => b[0] - a[0]).map(([, i]) => i);
-  const used = new Set();
-  clusters.sort((a, b) => load(b, bestDay) - load(a, bestDay));
-  for (const c of clusters) {
+  // 2) 스팟은 가장 가까운 숙소의 구간으로(숙소가 하나면 전부 그 구간)
+  for (const sp of spots) {
+    let best = segs[0];
+    for (const sg of segs) {
+      if (!sg.hotel) continue;
+      if (!best.hotel || distKm(sg.hotel, sp) < distKm(best.hotel, sp)) best = sg;
+    }
+    best.spots.push(sp);
+  }
+  // 3) 구간 안에서 날짜별로 나눈다: 가까운 곳끼리 묶고(k-means), 큰 묶음부터 여유가 가장 많은 날에
+  const used = caps.map(() => 0);
+  const placeCluster = (c, days) => {
+    const ok = days.filter((di) => c.every((sp) => allowed(sp, di)));
+    const pool = ok.length ? ok : days.filter((di) => di !== last);
+    if (!pool.length) return false;
     let pick = null;
-    for (const i of dayIdx) {
-      if (used.has(i)) continue;
-      const h = dayHotel(trip, i);
-      const score = Math.max(0, load(c, i) - caps[i]) * 3 + (h ? distKm(centroid(c), h) * 3 : 0);
-      if (!pick || score < pick.score - 0.01) pick = { i, score };
+    for (const di of pool) {
+      const room = caps[di] - used[di] - load(c, di);
+      if (!pick || room > pick.room) pick = { di, room };
     }
-    used.add(pick.i);
-    out[pick.i].push(...c);
+    out[pick.di].push(...c);
+    used[pick.di] = load(out[pick.di], pick.di);
+    return true;
+  };
+  const leftovers = [];
+  for (const sg of segs) {
+    if (!sg.spots.length) continue;
+    const k = Math.min(sg.days.length, sg.spots.length);
+    const clusters = kmeans(sg.spots, k).filter((c) => c.length);
+    // 스팟이 적어 한 곳씩 흩어진 경우: 3km 안의 묶음은 하루 용량이 허락하면 합친다
+    const maxCap = Math.max(...sg.days.map((di) => caps[di]));
+    const refDay = sg.days.find((di) => caps[di] === maxCap);
+    for (let merged = true; merged; ) {
+      merged = false;
+      let best = null;
+      for (let i = 0; i < clusters.length; i++)
+        for (let j = i + 1; j < clusters.length; j++) {
+          const d = distKm(centroid(clusters[i]), centroid(clusters[j]));
+          if (d < 3 && load([...clusters[i], ...clusters[j]], refDay) <= maxCap && (!best || d < best.d)) best = { i, j, d };
+        }
+      if (best) {
+        clusters[best.i].push(...clusters[best.j]);
+        clusters.splice(best.j, 1);
+        merged = true;
+      }
+    }
+    clusters.sort((a, b) => load(b, refDay) - load(a, refDay));
+    for (const c of clusters) if (!placeCluster(c, sg.days)) leftovers.push(...c);
+  }
+  // 구간에 넣을 날이 없던 스팟(예: 마지막 날만 있는 구간)은 어느 날이든 가능한 곳 중 가장 가까운 날로
+  for (const sp of leftovers) {
+    let pick = null;
+    for (let di = 0; di < n; di++) {
+      if (!allowed(sp, di)) continue;
+      const h = dayHotel(trip, di);
+      const score = (h ? distKm(h, sp) : 0) + Math.max(0, load([...out[di], sp], di) - caps[di]) / 10;
+      if (!pick || score < pick.score) pick = { di, score };
+    }
+    if (pick) out[pick.di].push(sp);
+    else out[Math.max(0, last - 1)].push(sp);
   }
 
-  // 과부하 해소: 넘치는 날에서 여유 있는 날로, 그 날 중심에 가장 가까운 스팟을 옮긴다
+  // 4) 과부하 해소: 넘치는 날에서 여유 있는 날로, 그 날 중심에 가장 가까운 스팟을 옮긴다(가까운 숙소의 날을 우선)
   for (let guard = 0; guard < 40; guard++) {
     const over = out.findIndex((list, i) => list.length > 1 && load(list, i) > caps[i]);
     if (over < 0) break;
     let move = null;
     out.forEach((list, i) => {
       if (i === over) return;
-      const center = list.length ? centroid(list) : dayHotel(trip, i) || centroid(out[over]);
+      const h = dayHotel(trip, i);
+      const center = list.length ? centroid(list) : h || centroid(out[over]);
       for (const p of out[over]) {
+        if (!allowed(p, i)) continue;
         const after = load([...list, p], i);
         if (after > caps[i]) continue;
-        const d = distKm(p, center);
+        // 다른 숙소 구간으로 넘기는 건 멀리 돌아가는 셈이라 거리 페널티를 준다
+        const sameHotel = h && dayHotel(trip, over)?.id === h.id;
+        const d = distKm(p, center) + (sameHotel ? 0 : (h ? distKm(p, h) : 0));
         if (!move || d < move.d) move = { p, to: i, d };
       }
     });

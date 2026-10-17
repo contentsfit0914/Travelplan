@@ -18,6 +18,7 @@ import {
   dayOrigin,
   isMoveDay,
   departurePlan,
+  okOnLastDay,
 } from '../js/planner.js';
 import { syncTrip, sanitizeTrip } from '../js/store.js';
 import { DEMO_PLACES } from '../js/data/demo-places.js';
@@ -365,4 +366,45 @@ test('지운 숙소의 밤은 앞 밤의 숙소로 채운다', () => {
   syncTrip(t);
   assert.ok(t.nightHotel.every((id) => id === 'demo:h-shinjuku'));
   assert.ok(!t.days.some((d) => d.stops.some((s) => s.fixed === 'move')));
+});
+
+// ---- 숙소 구간별 배분·귀국일 제한 ------------------------------------------
+const HAKONE = { lat: 35.2323, lng: 139.1069 };
+const hk = (id, name, dlat, dlng, stay = 75) => ({ id: `t:${id}`, uid: id, name, lat: HAKONE.lat + dlat, lng: HAKONE.lng + dlng, kind: 'sight', types: ['tourist_attraction'], stay, mode: 'AUTO', meal: null });
+function hakoneTokyo(departureTime = '14:00') {
+  // 1~2박 하코네, 3~4박 도쿄(우에노). 귀국 나리타
+  const hotelHakone = { ...hk('h-hakone', '하코네 숙소', 0, 0), kind: 'hotel', types: ['lodging'], checkIn: '15:00', checkOut: '11:00' };
+  const t = trip({
+    hotels: [hotelHakone, H('h-ueno')],
+    nightHotel: ['t:h-hakone', 't:h-hakone', 'demo:h-ueno', 'demo:h-ueno'],
+    departure: { date: '2026-11-23', time: departureTime, airport: 'NRT', mode: 'AUTO' },
+    dayStart: '10:00',
+    mustSpots: [],
+  });
+  return syncTrip(t);
+}
+const hakoneSpots = () => [hk('pirate', '하코네 해적선', 0.01, -0.02, 90), hk('owakudani', '오와쿠다니', 0.02, 0.01, 60), hk('machi', '하코네마치', -0.005, 0.005, 75)];
+const tokyoSpots = () => ['ueno-park', 'sensoji', 'akiba', 'tnm', 'skytree'].map((id) => ({ ...byId(id), stay: 60 }));
+
+test('숙소 구간별 배분: 하코네 스팟은 하코네 숙소에 묵는 날(D1·D2)에, 도쿄 스팟은 도쿄 숙소 날에 들어간다', () => {
+  const t = hakoneTokyo('14:00');
+  const out = autoDistribute(t, [...hakoneSpots(), ...tokyoSpots()]);
+  const dayOf = (uid) => out.findIndex((list) => list.some((s) => s.uid === uid));
+  for (const uid of ['pirate', 'owakudani', 'machi']) assert.ok([0, 1].includes(dayOf(uid)), `${uid} → D${dayOf(uid) + 1}`);
+  for (const uid of ['ueno-park', 'sensoji', 'akiba', 'tnm', 'skytree']) assert.ok([2, 3].includes(dayOf(uid)), `${uid} → D${dayOf(uid) + 1}`);
+  // 14:00 출발이면 귀국일(D5)엔 여유가 없어 아무것도 넣지 않는다
+  assert.equal(out[4].length, 0);
+});
+
+test('귀국일: 저녁 비행기면 숙소에서 30분 안의 짧은 스팟만 넣고, 먼 곳은 넣지 않는다', () => {
+  const t = hakoneTokyo('21:00');
+  assert.ok(dayCapacity(t, 4) > 120, '저녁 출발이라 귀국일에 여유가 있어야 한다');
+  const near = { ...byId('ueno-park'), stay: 60 }; // 우에노 숙소 바로 옆
+  const far = { ...byId('odaiba'), stay: 180 }; // 멀고 오래 머무는 곳
+  assert.equal(okOnLastDay(t, near), true);
+  assert.equal(okOnLastDay(t, far), false);
+  // 도쿄 구간(D3~D5)에 스팟이 많아 넘칠 때도 먼 곳은 귀국일로 가지 않는다
+  const many = [...tokyoSpots(), far, { ...byId('teamlab'), stay: 150 }, { ...byId('shibuya-sky'), stay: 90 }];
+  const out = autoDistribute(t, many);
+  for (const s of out[4]) assert.ok(okOnLastDay(t, s), `귀국일에 들어간 ${s.name}은 가깝고 짧아야 한다`);
 });
