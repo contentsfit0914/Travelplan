@@ -166,6 +166,16 @@ function isOpenAt(intervals, x) {
   return intervals.some(([o, c]) => [x, x + WEEK, x - WEEK].some((v) => v >= o && v < c));
 }
 
+// 그날 [from, to] 사이에 한 번이라도 문을 여는지(영업시간 정보가 없으면 모른다고 보고 true)
+export function isOpenDuring(place, dateStr, from, to) {
+  const periods = place.hours?.periods;
+  if (!periods?.length) return true;
+  const base = weekday(dateStr) * 1440;
+  const a = base + from;
+  const b = base + to;
+  return openIntervals(periods).some(([o, c]) => [0, WEEK, -WEEK].some((k) => o + k < b && c + k > a));
+}
+
 export function hoursWarning(stop, dateStr, arrive, depart) {
   const periods = stop.hours?.periods;
   if (!periods?.length) return null;

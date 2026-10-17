@@ -3,6 +3,8 @@
 
 import {
   computeDay,
+  isOpenDuring,
+  hoursWarning,
   dayLabel,
   dayDate,
   dayWindow,
@@ -1787,6 +1789,14 @@ async function loadRec() {
       }
     }
     if (sh.token !== token || S.ui.sheet !== sh) return;
+    // 그날 문을 닫는 곳은 뺀다: 식사 자리는 그 시각에, 장소 기준이면 그 장소를 떠난 뒤 시간에, 아니면 그날 가용 시간 안에
+    const date = dayDate(t, S.ui.day);
+    const rr = computeDay(t, S.ui.day, seg());
+    const anchorRow = rr.rows.find((x) => x.stop.uid === sh.anchor);
+    const slot = sh.gapAt != null ? [sh.gapAt, sh.gapAt + t.mealMinutes] : anchorRow ? [anchorRow.depart + 10, anchorRow.depart + 70] : null;
+    const total = found.length;
+    found = found.filter((p) => (slot ? !hoursWarning(p, date, slot[0], slot[1]) : isOpenDuring(p, date, rr.win.start, rr.win.rawEnd)));
+    const closedN = total - found.length;
     let results = scoreCandidates(found, day, centers);
     if (sh.budget && centers.length === 1) {
       // 식사 자리에서 오차범위 안에 갈 수 있는 곳만(추정 이동시간 기준)
@@ -1802,6 +1812,7 @@ async function loadRec() {
         results = results.sort((a, b) => a.reach - b.reach).slice(0, 5);
       }
     }
+    if (closedN) sh.note = `${sh.note ? `${sh.note} ` : ''}그날 영업하지 않는 ${closedN}곳은 뺐어요.`;
     sh.results = results;
   } catch (e) {
     if (sh.token !== token) return;

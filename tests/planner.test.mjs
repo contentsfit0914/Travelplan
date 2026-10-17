@@ -19,6 +19,7 @@ import {
   isMoveDay,
   departurePlan,
   okOnLastDay,
+  isOpenDuring,
 } from '../js/planner.js';
 import { syncTrip, sanitizeTrip } from '../js/store.js';
 import { DEMO_PLACES } from '../js/data/demo-places.js';
@@ -434,4 +435,19 @@ test('여행 스타일: 넣을 날이 없는 스팟은 unplaced 로 돌려준다
   assert.equal(out.unplaced.length, 1);
   assert.equal(out.unplaced[0].uid, 'sensoji');
   assert.equal(out.flat().filter((s) => !s.fixed).length, 1);
+});
+
+// ---- 영업시간으로 추천 후보 거르기 ---------------------------------------------
+test('isOpenDuring: 그 요일 휴무면 false, 영업시간이 하루 가용 시간과 겹치면 true, 정보 없으면 true', () => {
+  // 2026-11-18 은 수요일(3). 월·화·목~일 11:00~15:00 영업, 수요일 휴무
+  const periods = [0, 1, 2, 4, 5, 6].map((d) => ({ open: { day: d, hour: 11, minute: 0 }, close: { day: d, hour: 15, minute: 0 } }));
+  const p = { hours: { periods } };
+  assert.equal(isOpenDuring(p, '2026-11-18', 9 * 60, 21 * 60), false, '수요일 휴무');
+  assert.equal(isOpenDuring(p, '2026-11-19', 9 * 60, 21 * 60), true, '목요일 영업');
+  assert.equal(isOpenDuring(p, '2026-11-19', 16 * 60, 21 * 60), false, '목요일이지만 저녁엔 닫음');
+  assert.equal(isOpenDuring({ hours: null }, '2026-11-18', 9 * 60, 21 * 60), true, '정보 없음');
+  // 자정 넘어 영업(금 22:00~토 02:00)
+  const late = { hours: { periods: [{ open: { day: 5, hour: 22, minute: 0 }, close: { day: 6, hour: 2, minute: 0 } }] } };
+  assert.equal(isOpenDuring(late, '2026-11-20', 23 * 60, 24 * 60), true);
+  assert.equal(isOpenDuring(late, '2026-11-20', 9 * 60, 21 * 60), false);
 });
