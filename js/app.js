@@ -865,8 +865,8 @@ function stopHTML(row, di, edit = false, day = null) {
   const meta = s.fixed ? esc(s.name) : `${s.must ? '<em class="badge">메인</em>' : ''}${s.meal ? `<em class="badge meal">${MEAL_LABEL[s.meal]}</em>` : ''}${ratingHTML(s)} ${placeMeta(s)}`;
   const head = `<div class="stop-num">${row.num ?? icon('hotel', 18)}</div>`;
   const when = `<span class="when">${fmtTime(row.arrive)} – ${fmtTime(row.depart)}<small> · ${fmtDur(s.stay)}</small></span>`;
-  const photo = s.fixed ? null : photoOf(s);
-  const thumb = `<span class="sb-thumb ${photo ? '' : 'ph'}">${photo ? `<img src="${esc(photo)}" alt="" loading="lazy">` : s.fixed ? icon('hotel', 38) : placeIcon(s, 38)}</span>`;
+  const photo = photoOf(s);
+  const thumb = `<span class="sb-thumb ${photo ? '' : 'ph'}">${photo ? `<img src="${esc(photo)}" alt="" loading="lazy">` : s.fixed ? icon('hotel', 40) : placeIcon(s, 40)}</span>`;
   if (!edit) {
     const quick = S.ui.quick === s.uid;
     const mv = quick ? moveability(day, row.index) : null;

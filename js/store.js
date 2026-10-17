@@ -79,6 +79,9 @@ export function syncTrip(trip) {
       address: h.address || '',
       kind: 'hotel',
       types: ['lodging'],
+      photo: h.photo || null, // 숙소 Google 사진(카드 썸네일)
+      photoAttr: h.photoAttr || '',
+      mapsUrl: h.mapsUrl || null,
       fixed: want,
       checkIn: h.checkIn || trip.checkIn,
       stay: want === 'arrival' ? (trip.restMin ?? 30) : cur?.fixed === 'move' ? cur.stay : MOVE_STAY,
