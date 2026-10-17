@@ -51,7 +51,7 @@ import { RouteCache } from './routes.js';
 import { MapView } from './mapview.js';
 import { createDemoProvider } from './providers/demo.js';
 import { createGoogleProvider } from './providers/google.js';
-import { avatarSVG, cleanAvatar, defaultAvatar, randomAvatar, AVATAR_BODIES, AVATAR_COLORS, AVATAR_FACES, AVATAR_HATS, AVATAR_ITEMS } from './avatar.js';
+import { avatarSVG, cleanAvatar, defaultAvatar, randomAvatar, AVATAR_BODIES, AVATAR_EARS, AVATAR_COLORS, AVATAR_FACES, AVATAR_HATS, AVATAR_ITEMS } from './avatar.js';
 import { QUICK_SPOTS, DEMO_PLACES } from './data/demo-places.js';
 
 const CFG = window.TRAVELPLAN_CONFIG || {};
@@ -69,6 +69,7 @@ const ICON = {
   gear: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   share: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>',
   close: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  pencil: '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
   route: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="5" r="2.5"/><path d="M7 17.5c4-1 2-6 6-7.5s4-3 4.5-5"/><path d="M7.5 17.5 13 10"/></svg>',
   heart: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20.5s-7.5-4.6-9.3-9.2C1.4 8 3.5 4.5 7 4.5c2 0 3.4 1 5 3 1.6-2 3-3 5-3 3.5 0 5.6 3.5 4.3 6.8C19.5 15.9 12 20.5 12 20.5z"/></svg>',
   food: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v7a3 3 0 0 0 3 3v8M9 3v6M3 3v6"/><path d="M18 3c-2 0-3.5 2.5-3.5 6 0 2.5 1.2 4 2.5 4v8"/><path d="M18 3v10"/></svg>',
@@ -306,6 +307,12 @@ function render(opts = {}) {
   $('.app').classList.toggle('map-big', S.ui.mapBig);
   if (S.tour && (S.ui.screen !== 'plan' || S.ui.day !== S.tour.di)) stopTour();
   renderTourBar();
+  $('#mapActions').innerHTML =
+    S.ui.screen === 'plan'
+      ? `<button class="icon-btn" data-action="edit-setup" data-step="1" aria-label="여행 설정 수정" title="여행 설정 수정">${ICON.pencil}</button>
+         <button class="icon-btn" data-action="share" aria-label="일정 공유" title="일정 공유">${ICON.share}</button>
+         <button class="icon-btn" data-action="open-settings" aria-label="설정" title="설정">${ICON.gear}</button>`
+      : `<button class="icon-btn" data-action="open-settings" aria-label="설정" title="설정">${ICON.gear}</button>`;
   $('#modeBadge').innerHTML = isDemo()
     ? `<button data-action="open-settings" class="badge-demo">${CFG.preview ? '미리보기' : '데모 모드'}</button>`
     : `<span class="badge-live">Google 지도</span>`;
@@ -339,7 +346,7 @@ function setupHTML() {
       <div class="eyebrow">${t.created ? '여행 설정 수정' : '여행 준비'} · ${step}/4</div>
       <h1>${STEP_TITLES[step]}</h1>
     </div>
-    ${t.created ? `<button class="btn btn-sm btn-primary" data-action="save-setup" ${datesOk ? '' : 'disabled'}>저장하고 일정 보기</button>` : `<button class="icon-btn" data-action="open-settings" aria-label="설정">${ICON.gear}</button>`}
+    ${t.created ? `<button class="btn btn-sm btn-primary" data-action="save-setup" ${datesOk ? '' : 'disabled'}>저장하고 일정 보기</button>` : ''}
   </header>
   <nav class="stepnav" aria-label="설정 단계">${[1, 2, 3, 4]
     .map((n) => `<button class="${n === step ? 'on' : n < step ? 'done' : ''}" data-action="goto-step" data-step="${n}" ${n === step ? 'aria-current="step"' : ''}><i>${n}</i>${STEP_SHORT[n]}</button>`)
@@ -652,26 +659,20 @@ function setupStep4() {
 function planHTML() {
   const t = S.trip;
   const di = S.ui.day;
-  const tabs = [`<button class="daytab ${di === -1 ? 'on' : ''}" data-action="day" data-day="-1"><b>전체</b><small>${t.nights}박${t.nights + 1}일</small></button>`]
+  const tabs = [`<button class="daytab ${di === -1 ? 'on' : ''}" data-action="day" data-day="-1"><b>전체</b></button>`]
     .concat(
       t.days.map(
         (_, i) =>
-          `<button class="daytab ${di === i ? 'on' : ''}" style="--c:${color(i)}" data-action="day" data-day="${i}"><b><i class="dot"></i>D${i + 1}</b><small>${dayLabel(t, i)}</small></button>`,
+          `<button class="daytab ${di === i ? 'on' : ''}" style="--c:${color(i)}" data-action="day" data-day="${i}"><b><i class="dot"></i>D${i + 1}</b><small>${dayLabel(t, i).replace(/\(.*\)/, '')}</small></button>`,
       ),
     )
     .join('');
   return `
   <div class="sticky-head">
-  <header class="topbar">
+  <header class="topbar compact">
     ${avatarButton()}
     <div class="tb-title">
-      <div class="eyebrow">${dayLabel(t, 0)} – ${dayLabel(t, t.nights)} · ${t.people}명</div>
-      <h1>도쿄 ${t.nights}박 ${t.nights + 1}일</h1>
-    </div>
-    <div class="top-actions">
-      <button class="btn btn-sm" data-action="edit-setup" data-step="1" aria-label="여행 설정 수정">✎ 설정</button>
-      <button class="icon-btn" data-action="share" aria-label="일정 공유">${ICON.share}</button>
-      <button class="icon-btn" data-action="open-settings" aria-label="설정">${ICON.gear}</button>
+      <h1>도쿄 ${t.nights}박 ${t.nights + 1}일 <span class="tb-sub">${dayLabel(t, 0).replace(/\(.*\)/, '')}–${dayLabel(t, t.nights).replace(/\(.*\)/, '')} · ${t.people}명</span></h1>
     </div>
   </header>
   <nav class="daytabs" role="tablist">${tabs}</nav>
@@ -1185,7 +1186,7 @@ function keySectionHTML() {
 
 // ---------------------------------------------------------------- 내 캐릭터
 const myAvatar = () => cleanAvatar(S.settings.avatar || defaultAvatar());
-const avatarButton = () => `<button class="av-btn" data-action="open-avatar" aria-label="내 캐릭터 꾸미기">${avatarSVG(myAvatar(), { size: 34, ground: false })}</button>`;
+const avatarButton = () => `<button class="av-btn" data-action="open-avatar" aria-label="내 캐릭터 꾸미기">${avatarSVG(myAvatar(), { size: 40, ground: false })}</button>`;
 
 function setAvatar(patch) {
   S.settings.avatar = cleanAvatar({ ...myAvatar(), ...patch });
@@ -1208,7 +1209,9 @@ function avatarSheetHTML() {
     </div>
     <p class="hint center">지도 위에서 이 캐릭터가 하루 동선을 따라 걸어요. 일정 화면의 <b>▶ 동선 따라가기</b>를 눌러 보세요.</p>
     <div class="section-title">몸</div>
-    ${opt('body', AVATAR_BODIES, (k) => mini({ body: k, hat: 'none', item: 'none', face: 'dot' }))}
+    ${opt('body', AVATAR_BODIES, (k) => mini({ body: k, hat: 'none', item: 'none', face: 'dot', ears: 'none' }))}
+    <div class="section-title">귀</div>
+    ${opt('ears', AVATAR_EARS, (k) => mini({ ears: k, hat: 'none', item: 'none', face: 'dot' }))}
     <div class="section-title">색</div>
     <div class="av-opts swatches">${AVATAR_COLORS.map((c) => `<button class="swatch ${av.color === c ? 'on' : ''}" style="--sw:${c}" data-action="av-set" data-field="color" data-value="${c}" aria-label="색 ${c}"></button>`).join('')}</div>
     <div class="section-title">표정</div>
@@ -2643,6 +2646,7 @@ function mount() {
       <div id="modeBadge" class="mode-badge"></div>
       <button class="map-toggle" data-action="toggle-map" aria-label="지도 크게 보기">${ICON.expand}</button>
       <div id="tourBar" class="tour-bar"></div>
+      <div id="mapActions" class="map-actions"></div>
     </div>
     <div class="panel-wrap">
       <main id="panel" class="panel"></main>
