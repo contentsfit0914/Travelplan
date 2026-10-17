@@ -51,7 +51,8 @@ import { RouteCache } from './routes.js';
 import { MapView } from './mapview.js';
 import { createDemoProvider } from './providers/demo.js';
 import { createGoogleProvider } from './providers/google.js';
-import { spriteHTML, setSprite, headingAnim, cleanAvatar, defaultAvatar, SPRITE_ANIMS } from './avatar.js';
+import { avatarSVG, cleanAvatar, defaultAvatar, randomAvatar, AVATAR_BODIES, AVATAR_EARS, AVATAR_COLORS, AVATAR_FACES, AVATAR_HATS, AVATAR_ITEMS, spriteHTML, setSprite, headingAnim, SPRITE_ANIMS } from './avatar.js';
+import { loadSprites, saveSprite, deleteSprite, clearSprites, normalizeSheet, applySprites, SPRITE_KEYS } from './sprites.js';
 import { QUICK_SPOTS, DEMO_PLACES } from './data/demo-places.js';
 
 const CFG = window.TRAVELPLAN_CONFIG || {};
@@ -81,6 +82,7 @@ const STEP_SHORT = ['', '항공·기본', '숙소', '메인 스팟', '시간·�
 const S = {
   trip: loadTrip(),
   tour: null, // 동선 재생 상태
+  sprites: null, // 이 기기에 올린 캐릭터 이미지(없으면 기본 SVG 캐릭터)
   settings: loadSettings(),
   provider: createDemoProvider(),
   providerError: '',
@@ -1191,7 +1193,16 @@ function keySectionHTML() {
 
 // ---------------------------------------------------------------- 내 캐릭터
 const myAvatar = () => cleanAvatar(S.settings.avatar || defaultAvatar());
-const avatarButton = () => `<button class="av-btn" data-action="open-avatar" aria-label="내 캐릭터">${spriteHTML('down', { size: 40 })}</button>`;
+const hasSprites = () => !!S.sprites;
+// 캐릭터 그리기: 올린 이미지가 있으면 스프라이트, 없으면 기본 SVG 마스코트
+const charHTML = (anim, { size = 48, play = false } = {}) =>
+  hasSprites() ? spriteHTML(anim, { size, play }) : avatarSVG(myAvatar(), { size: Math.round(size * 0.92), walk: play, ground: false });
+function setChar(el, anim, play) {
+  if (hasSprites()) setSprite(el, anim, play);
+  else el.querySelector('svg')?.classList.toggle('av-walk', !!play);
+  el.classList.toggle('walking', !!play);
+}
+const avatarButton = () => `<button class="av-btn" data-action="open-avatar" aria-label="내 캐릭터">${charHTML('down', { size: 40 })}</button>`;
 
 function setAvatar(patch) {
   S.settings.avatar = cleanAvatar({ ...myAvatar(), ...patch });
@@ -1199,20 +1210,61 @@ function setAvatar(patch) {
   avatarElCache.clear();
 }
 
+// 내 기기에 올린 캐릭터 이미지 관리(공개 사이트에는 올라가지 않는다)
+function spriteSlotsHTML() {
+  const sp = S.sprites || {};
+  const n = SPRITE_KEYS.filter((k) => sp[k]).length;
+  return `
+    <div class="section-title">내 캐릭터 이미지 <span class="muted">· 이 기기에만 저장</span></div>
+    <p class="hint">투명 배경 PNG, 한 장에 <b>가로 4칸 × 세로 2칸(8프레임)</b>으로 그려진 시트를 동작별로 올려요. 앞으로 시트만 있어도 돼요(나머지 동작은 그걸로 대신해요). 이미지는 이 휴대폰 브라우저에만 저장되고 공개 사이트·공유 파일에는 들어가지 않아요.</p>
+    <div class="spr-slots">${SPRITE_KEYS.map(
+      (k) => `<label class="spr-slot ${sp[k] ? 'has' : ''}">
+        ${sp[k] ? spriteHTML(k, { size: 44, play: true }) : `<span class="spr-empty">＋</span>`}
+        <small>${SPRITE_ANIMS[k]}</small>
+        <input type="file" accept="image/png,image/webp" data-spr="${k}" hidden>
+        ${sp[k] ? `<button class="spr-del" data-action="spr-del" data-k="${k}" aria-label="${SPRITE_ANIMS[k]} 이미지 삭제">✕</button>` : ''}
+      </label>`,
+    ).join('')}</div>
+    ${S.ui.sprBusy ? `<p class="hint"><span class="spinner sm"></span> 이미지 정리 중…</p>` : ''}
+    ${n ? `<button class="btn btn-sm btn-danger" data-action="spr-clear">이미지 모두 지우고 기본 캐릭터로</button>` : ''}`;
+}
+
 function avatarSheetHTML() {
   const av = myAvatar();
   const preview = S.ui.avPreview || 'down';
+  const opt = (field, list, make) =>
+    `<div class="av-opts">${list
+      .map(([k, label]) => `<button class="av-opt ${av[field] === k ? 'on' : ''}" data-action="av-set" data-field="${field}" data-value="${k}" aria-label="${label}" title="${label}">${make(k)}<small>${label}</small></button>`)
+      .join('')}</div>`;
+  const mini = (o) => avatarSVG({ ...av, ...o }, { size: 40, ground: false });
   return `
   <div class="sheet-head"><b>내 캐릭터</b><button class="icon-btn" data-action="close-sheet" aria-label="닫기">${ICON.close}</button></div>
   <div class="sheet-body av-sheet">
-    <div class="av-stage"><div class="av-stage-in">${spriteHTML(preview, { size: 150, play: true })}</div>
+    <div class="av-stage"><div class="av-stage-in">${charHTML(preview, { size: 150, play: true })}</div>
       <input class="av-name" type="text" maxlength="8" placeholder="이름 (선택)" value="${esc(av.name)}" data-avname enterkeyhint="done">
     </div>
-    <p class="hint center">쿠리만쥬가 지도 위에서 하루 동선을 따라 걷고, 맛집·카페에 도착하면 한잔해요. 일정 화면의 <b>▶ 동선 따라가기</b>를 눌러 보세요.</p>
-    <div class="section-title">동작 미리보기</div>
+    <p class="hint center">지도 위에서 이 캐릭터가 하루 동선을 따라 걷고, 맛집·카페에 도착하면 쉬어 가요. 일정 화면의 <b>▶ 동선 따라가기</b>를 눌러 보세요.</p>
+    ${
+      hasSprites()
+        ? `<div class="section-title">동작 미리보기</div>
     <div class="av-opts anims">${Object.entries(SPRITE_ANIMS)
       .map(([k, label]) => `<button class="av-opt ${preview === k ? 'on' : ''}" data-action="av-preview" data-v="${k}" aria-label="${label}">${spriteHTML(k, { size: 44, play: preview === k })}<small>${label}</small></button>`)
-      .join('')}</div>
+      .join('')}</div>`
+        : `<div class="section-title">몸</div>
+    ${opt('body', AVATAR_BODIES, (k) => mini({ body: k, hat: 'none', item: 'none', face: 'dot', ears: 'none' }))}
+    <div class="section-title">귀</div>
+    ${opt('ears', AVATAR_EARS, (k) => mini({ ears: k, hat: 'none', item: 'none', face: 'dot' }))}
+    <div class="section-title">색</div>
+    <div class="av-opts swatches">${AVATAR_COLORS.map((c) => `<button class="swatch ${av.color === c ? 'on' : ''}" style="--sw:${c}" data-action="av-set" data-field="color" data-value="${c}" aria-label="색 ${c}"></button>`).join('')}</div>
+    <div class="section-title">표정</div>
+    ${opt('face', AVATAR_FACES, (k) => mini({ face: k, hat: 'none', item: 'none' }))}
+    <div class="section-title">모자</div>
+    ${opt('hat', AVATAR_HATS, (k) => mini({ hat: k, item: 'none' }))}
+    <div class="section-title">소지품</div>
+    ${opt('item', AVATAR_ITEMS, (k) => mini({ item: k }))}
+    <div class="row-actions"><button class="btn" data-action="av-random">🎲 랜덤</button></div>`
+    }
+    ${spriteSlotsHTML()}
     <div class="row-actions"><button class="btn btn-primary wide" data-action="close-sheet">완료</button></div>
   </div>`;
 }
@@ -1221,23 +1273,42 @@ function avatarSheetHTML() {
 const avatarElCache = new Map();
 function avatarEl(anim = 'down', play = false) {
   const av = myAvatar();
-  const key = JSON.stringify(av);
+  const key = `${hasSprites() ? 'spr' : 'svg'}:${JSON.stringify(av)}`;
   if (!avatarElCache.has(key)) {
     const el = document.createElement('div');
     el.className = 'av-marker';
-    el.innerHTML = `${spriteHTML('down', { size: 56 })}${av.name ? `<span class="av-tag">${esc(av.name)}</span>` : ''}`;
+    el.innerHTML = `${charHTML('down', { size: 56 })}${av.name ? `<span class="av-tag">${esc(av.name)}</span>` : ''}`;
     avatarElCache.set(key, el);
   }
   const el = avatarElCache.get(key);
-  setSprite(el, anim, play);
+  setChar(el, anim, play);
   return el;
 }
 
 // 서 있을 때의 동작: 맛집·카페에 있으면 먹기, 아니면 앞을 보고 서기
 function idleAnim() {
   const f = S.ui.focus && findStop(S.ui.focus);
-  if (f && f.di === S.ui.day && (f.s.kind === 'food' || f.s.kind === 'cafe')) return ['eat', true];
+  if (f && f.di === S.ui.day && (f.s.kind === 'food' || f.s.kind === 'cafe')) return ['eat', hasSprites()];
   return ['down', false];
+}
+
+// 올린 캐릭터 이미지를 정리해 이 기기에 저장
+async function uploadSprite(key, file) {
+  if (!file) return;
+  S.ui.sprBusy = true;
+  renderSheet();
+  try {
+    const dataUrl = await normalizeSheet(file);
+    await saveSprite(key, dataUrl);
+    S.sprites = { ...(S.sprites || {}), [key]: dataUrl };
+    applySprites(S.sprites);
+    avatarElCache.clear();
+    toast(`${SPRITE_ANIMS[key]} 이미지를 저장했어요`);
+  } catch (e) {
+    toast(e?.message || '이미지를 읽지 못했어요');
+  }
+  S.ui.sprBusy = false;
+  render();
 }
 
 // 캐릭터가 서 있을 곳: 재생 중엔 재생 위치, 아니면 고른 장소 → 그날 출발점 → 숙소
@@ -1334,7 +1405,7 @@ function startTour(di) {
       if (dir !== tr.anim || !tr.playing) {
         tr.anim = dir;
         tr.playing = true;
-        setSprite(avatarEl(dir, true), dir, true);
+        avatarEl(dir, true);
       }
       mapView.moveAvatar(tr.pos);
       if (!mapView.contains(tr.pos)) mapView.panTo(tr.pos);
@@ -1348,10 +1419,10 @@ function arriveAt(mark) {
   const tr = S.tour;
   tr.text = `${fmtTime(mark.time)} ${mark.icon} ${mark.name}`;
   // 장소에 멈춘 동안: 맛집·카페면 먹기, 아니면 앞을 보고 서기
-  const eat = mark.kind === 'food' || mark.kind === 'cafe';
+  const eat = (mark.kind === 'food' || mark.kind === 'cafe') && hasSprites();
   tr.anim = eat ? 'eat' : 'down';
   tr.playing = eat;
-  setSprite(avatarEl(tr.anim, eat), tr.anim, eat);
+  avatarEl(tr.anim, eat);
   tr.pos = posAt(tr, mark.d);
   mapView.moveAvatar(tr.pos);
   mapView.panTo(tr.pos);
@@ -1403,8 +1474,8 @@ function renderTourBar() {
   const show = S.ui.screen === 'plan' && di >= 0 && t.days[di]?.stops.some((s) => !s.fixed);
   if (!show) return (bar.innerHTML = '');
   bar.innerHTML = S.tour
-    ? `<button class="tour-btn on" data-action="tour-stop" aria-label="동선 재생 멈추기"><span class="tour-av">${spriteHTML('right', { size: 26, play: true })}</span><span class="tour-txt">${esc(S.tour.text)}</span><b>■</b></button>`
-    : `<button class="tour-btn" data-action="tour-play" aria-label="캐릭터가 오늘 동선을 따라갑니다"><span class="tour-av">${spriteHTML('down', { size: 26 })}</span>▶ 동선 따라가기</button>`;
+    ? `<button class="tour-btn on" data-action="tour-stop" aria-label="동선 재생 멈추기"><span class="tour-av">${charHTML('right', { size: 26, play: true })}</span><span class="tour-txt">${esc(S.tour.text)}</span><b>■</b></button>`
+    : `<button class="tour-btn" data-action="tour-play" aria-label="캐릭터가 오늘 동선을 따라갑니다"><span class="tour-av">${charHTML('down', { size: 26 })}</span>▶ 동선 따라가기</button>`;
 }
 
 function settingsHTML() {
@@ -2426,6 +2497,32 @@ const actions = {
     S.ui.avPreview = d.v;
     renderSheet();
   },
+  'av-set': (d) => {
+    setAvatar({ [d.field]: d.value });
+    render();
+  },
+  'av-random': () => {
+    setAvatar(randomAvatar(myAvatar().name));
+    render();
+  },
+  'spr-del': async (d) => {
+    await deleteSprite(d.k);
+    const sp = { ...(S.sprites || {}) };
+    delete sp[d.k];
+    S.sprites = Object.keys(sp).length ? sp : null;
+    applySprites(S.sprites);
+    avatarElCache.clear();
+    render();
+  },
+  'spr-clear': async () => {
+    if (!(await ask('이 기기에 저장한 캐릭터 이미지를 모두 지우고 기본 캐릭터로 돌아갈까요?', '지우기', true))) return;
+    await clearSprites();
+    S.sprites = null;
+    applySprites(null);
+    avatarElCache.clear();
+    render();
+    toast('기본 캐릭터로 돌아왔어요');
+  },
   'tour-play': () => startTour(S.ui.day),
   'tour-stop': () => stopTour(),
   'open-settings': () => {
@@ -2533,6 +2630,12 @@ function onClick(e) {
 
 function onChange(e) {
   const el = e.target;
+  if (el.matches('[data-spr]')) {
+    const file = el.files?.[0];
+    el.value = '';
+    uploadSprite(el.dataset.spr, file);
+    return;
+  }
   if (el.matches('[data-avname]')) {
     setAvatar({ name: el.value.trim() });
     placeAvatar();
@@ -2674,6 +2777,14 @@ function mount() {
   });
   render();
   connect();
+  // 이 기기에 올려 둔 캐릭터 이미지가 있으면 그걸로 바꿔 그린다
+  loadSprites().then((sp) => {
+    if (!sp) return;
+    S.sprites = sp;
+    applySprites(sp);
+    avatarElCache.clear();
+    render();
+  });
 }
 
 mount();

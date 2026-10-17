@@ -491,15 +491,34 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; font-weight: 800; line
 /* 서 있을 땐 핀 오른쪽 옆에 서서 핀을 가리지 않는다 */
 .av-marker { display: flex; flex-direction: column; align-items: center; cursor: pointer; width: 60px; pointer-events: auto; transform: translateX(40%); }
 .av-marker .spr { filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 1px 1px rgba(28, 36, 51, 0.25)); }
+.av-marker svg { width: 50px; height: 46px; filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff); }
+.av-marker.walking svg { animation: av-bob 0.5s ease-in-out infinite; }
+.av-btn svg { width: 40px; height: 46px; margin-top: 8px; }
+.tour-btn .tour-av svg { width: 26px; height: 24px; }
+.av-stage-in svg { width: 160px; height: 150px; margin-top: 6px; }
+.av-opt svg { width: 44px; height: 40px; }
+.av-opts.swatches { grid-template-columns: repeat(8, 1fr); gap: 8px; }
+.swatch { aspect-ratio: 1; border-radius: 50%; border: 2px solid var(--line-strong); background: var(--sw); padding: 0; }
+.swatch.on { border-color: var(--ink); box-shadow: var(--hard-sm); transform: scale(1.08); }
+
+/* 캐릭터 이미지 올리기 칸 */
+.spr-slots { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.spr-slot { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 2px 6px; border-radius: 12px; border: 2px dashed var(--line-strong); background: #fff; color: var(--ink2); cursor: pointer; min-height: 84px; }
+.spr-slot.has { border-style: solid; border-color: var(--ink); background: var(--sun-soft); }
+.spr-slot small { font-size: 10.5px; font-weight: 700; }
+.spr-empty { width: 44px; height: 44px; display: grid; place-items: center; font-size: 22px; color: var(--muted); }
+.spr-del { position: absolute; top: -8px; right: -8px; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--ink); background: #fff; font-size: 11px; font-weight: 800; padding: 0; }
+
 .av-tag { margin-top: -4px; font-size: 10.5px; font-weight: 800; background: #fff; border: 1.5px solid var(--ink); border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
 
 /* 스프라이트: 4×2 시트, 8프레임 */
 .spr { display: inline-block; width: var(--s, 48px); height: var(--s, 48px); background-repeat: no-repeat; background-size: 400% 200%; background-position: 0 0; flex: none; }
-.spr-down { background-image: url('../assets/sprites/kurimanju-down.png'); }
-.spr-left { background-image: url('../assets/sprites/kurimanju-left.png'); }
-.spr-right { background-image: url('../assets/sprites/kurimanju-right.png'); }
-.spr-up { background-image: url('../assets/sprites/kurimanju-up.png'); }
-.spr-eat { background-image: url('../assets/sprites/kurimanju-eat.png'); }
+/* 시트 이미지는 사용자가 올린 것을 CSS 변수로 받는다(sprites.js applySprites) */
+.spr-down { background-image: var(--spr-down); }
+.spr-left { background-image: var(--spr-left); }
+.spr-right { background-image: var(--spr-right); }
+.spr-up { background-image: var(--spr-up); }
+.spr-eat { background-image: var(--spr-eat); }
 .spr.play { animation: spr8 0.9s steps(1, end) infinite; }
 .spr-eat.play { animation-duration: 1.6s; }
 @keyframes spr8 {
@@ -685,3 +704,16 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; font-weight: 800; line
 .btn.dashed .muted { font-weight: 500; font-size: 12.5px; margin-left: 2px; }
 .stays { flex-direction: column; align-items: stretch; gap: 8px; }
 .stay-row { display: flex; gap: 10px; align-items: center; }
+
+/* 아바타 애니메이션(걷기) */
+.avatar .av-leg { transform-box: fill-box; transform-origin: 50% 50%; }
+.av-walk .av-legL { animation: av-stepL 0.5s ease-in-out infinite; }
+.av-walk .av-legR { animation: av-stepR 0.5s ease-in-out infinite; }
+.av-walk .av-body { transform-box: fill-box; transform-origin: 50% 100%; animation: av-sway 0.5s ease-in-out infinite; }
+.av-walk .av-ground { transform-box: fill-box; transform-origin: center; animation: av-ground 0.5s ease-in-out infinite; }
+@keyframes av-stepL { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes av-stepR { 0%, 100% { transform: translateY(-5px); } 50% { transform: translateY(0); } }
+@keyframes av-sway { 0%, 100% { transform: rotate(-2.5deg) translateY(0); } 50% { transform: rotate(2.5deg) translateY(-2px); } }
+@keyframes av-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes av-ground { 0%, 100% { transform: scale(1); } 50% { transform: scale(0.88); } }
+@media (prefers-reduced-motion: reduce) { .av-walk *, .av-marker.walking svg { animation: none !important; } }
