@@ -69,6 +69,9 @@ const ICON = {
   gear: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   share: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>',
   close: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  route: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="5" r="2.5"/><path d="M7 17.5c4-1 2-6 6-7.5s4-3 4.5-5"/><path d="M7.5 17.5 13 10"/></svg>',
+  heart: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20.5s-7.5-4.6-9.3-9.2C1.4 8 3.5 4.5 7 4.5c2 0 3.4 1 5 3 1.6-2 3-3 5-3 3.5 0 5.6 3.5 4.3 6.8C19.5 15.9 12 20.5 12 20.5z"/></svg>',
+  food: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v7a3 3 0 0 0 3 3v8M9 3v6M3 3v6"/><path d="M18 3c-2 0-3.5 2.5-3.5 6 0 2.5 1.2 4 2.5 4v8"/><path d="M18 3v10"/></svg>',
   expand: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>',
 };
 const STEP_TITLES = ['', '항공편·기본 정보', '숙소', '가고 싶은 메인 스팟', '하루 시간·식사'];
@@ -870,10 +873,10 @@ function dayHTML(di) {
   }
 
   const flow = [
-    { n: 1, label: '이동 동선', done: real.length > 0, sub: real.length ? `${real.length}곳` : '비어 있음', action: '' },
-    { n: 2, label: '가볼만한 곳', done: sights >= 2, sub: `관광 ${sights}곳`, action: 'data-action="open-rec" data-tab="sight"' },
+    { icon: ICON.route, label: '이동 동선', done: real.length > 0, sub: real.length ? `${real.length}곳` : '비어 있음', action: routeUrl ? `data-action="open-rec" data-tab="sight" data-anchor="route"` : '' },
+    { icon: ICON.heart, label: '가볼만한 곳', done: sights >= 2, sub: `관광 ${sights}곳`, action: 'data-action="open-rec" data-tab="sight"' },
     {
-      n: 3,
+      icon: ICON.food,
       label: '맛집·카페',
       done: !r.gaps.length && foods > 0,
       sub: r.gaps.length ? `식사 ${r.gaps.length}끼 미정` : `${foods}곳`,
@@ -897,6 +900,13 @@ function dayHTML(di) {
         <span><i class="lg lg-meal"></i>식사·카페 ${fmtDur(r.totals.meal)}</span>
         ${r.overflow ? `<span class="over">⚠ ${fmtDur(r.overflow)} 초과${r.dep ? ' · 비행기 시간 확인' : ''}</span>` : `<span class="ok">여유 ${fmtDur(r.free)}</span>`}
       </div>
+      ${
+        edit
+          ? ''
+          : `<ol class="flow">${flow
+              .map((f) => `<li class="${f.done ? 'done' : ''}"><button ${f.action || 'disabled'}><span class="fi">${f.icon}</span><b>${f.label}</b><small>${f.sub}</small></button></li>`)
+              .join('')}</ol>`
+      }
       <div class="sum-actions">
         <button class="btn btn-sm ${edit ? 'btn-primary' : ''}" data-action="edit-order" ${real.length ? '' : 'disabled'}>${edit ? '✓ 편집 완료' : '↕ 순서·시간 편집'}</button>
         <button class="btn btn-sm" data-action="optimize" ${real.length < 2 ? 'disabled' : ''}>⇅ 자동 최적화</button>
@@ -905,9 +915,6 @@ function dayHTML(di) {
       </div>
     </div>
     ${edit ? `<div class="edit-hint">▲▼로 순서를 바꾸면 도착 시간과 이동 경로가 바로 다시 계산돼요.</div>` : ''}
-    <ol class="flow" ${edit ? 'hidden' : ''}>${flow
-      .map((f) => `<li class="${f.done ? 'done' : ''}"><button ${f.action || 'disabled'}><span class="fn">${f.done ? '✓' : f.n}</span><span><b>${f.label}</b><small>${f.sub}</small></span></button></li>`)
-      .join('')}</ol>
     ${!t.hotel ? `<div class="banner banner-err">숙소가 없어 출발·복귀 동선을 계산할 수 없어요. <button class="link" data-action="edit-setup" data-step="2">숙소 설정</button></div>` : ''}
     <div class="timeline">${parts.join('')}</div>
     ${!edit && real.length >= 2 ? '<p class="lp-hint">💡 일정 카드를 꾹 누르면 바로 순서를 바꿀 수 있어요</p>' : ''}
