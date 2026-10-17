@@ -521,6 +521,55 @@ function demoHotelList() {
   return `<p class="hint">데모 모드에서는 지역 대표 지점으로 숙소 위치를 정해요.</p>${resultsHTML('hotel')}`;
 }
 
+// 검색한 지역 주변 인기 스팟(검색 전엔 도쿄 기본 목록)
+function popularHTML(addedCount) {
+  const pop = S.ui.popular;
+  if (!pop) {
+    return `
+  <div class="chips-label">인기 스팟 빠르게 추가 <span class="muted">${addedCount ? `· ${addedCount}곳 추가됨 (다시 누르면 빠져요)` : '· 누르면 추가돼요'}</span></div>
+  <div class="chips">${QUICK_SPOTS.map((q) => {
+    const on = quickAdded(q);
+    const busy = S.ui.quickBusy === q;
+    return `<button class="chip quick ${on ? 'added' : ''}" data-action="quick-spot" data-q="${esc(q)}" aria-pressed="${on}" ${busy ? 'disabled' : ''}>${busy ? '<span class="spinner sm"></span>' : on ? '✓' : '＋'} ${esc(q)}</button>`;
+  }).join('')}</div>`;
+  }
+  const isAdded = (p) => S.trip.mustSpots.some((m) => m.id === p.id);
+  const n = pop.list.filter(isAdded).length;
+  return `
+  <div class="chips-label">'${esc(pop.q)}' 주변 인기 스팟 <span class="muted">${pop.loading ? '· 찾는 중…' : n ? `· ${n}곳 추가됨` : '· 누르면 추가돼요'}</span>
+    <button class="link small pop-reset" data-action="popular-reset">도쿄 전체 보기</button></div>
+  ${
+    pop.loading
+      ? `<div class="empty"><span class="spinner"></span></div>`
+      : pop.list.length
+        ? `<div class="chips">${pop.list
+            .map((p, i) => {
+              const on = isAdded(p);
+              return `<button class="chip quick ${on ? 'added' : ''}" data-action="quick-place" data-i="${i}" aria-pressed="${on}">${on ? '✓' : '＋'} ${esc(p.name)}${p.rating ? `<small class="muted"> ★${Number(p.rating).toFixed(1)}</small>` : ''}</button>`;
+            })
+            .join('')}</div>`
+        : `<p class="hint">이 지역 주변에서 인기 관광지를 찾지 못했어요. 위 검색 결과에서 직접 추가해 주세요.</p>`
+  }`;
+}
+
+// 검색한 장소를 중심으로 주변 인기 관광지를 불러온다
+async function loadPopular(q, center) {
+  S.ui.popular = { q, center, list: [], loading: true };
+  render();
+  try {
+    const res = await S.provider.nearby('sight', { lat: center.lat, lng: center.lng }, 2500);
+    const score = (p) => (p.rating != null ? p.rating * Math.log10((p.ratingCount || 0) + 10) : 0);
+    const list = res
+      .filter((p) => p.kind === 'sight' && p.id !== center.id)
+      .sort((a, b) => score(b) - score(a) || distKm(center, a) - distKm(center, b))
+      .slice(0, 10);
+    if (S.ui.popular?.q === q) S.ui.popular = { q, center, list, loading: false };
+  } catch {
+    if (S.ui.popular?.q === q) S.ui.popular = { q, center, list: [], loading: false };
+  }
+  render();
+}
+
 function setupStep3() {
   const t = S.trip;
   const addedCount = QUICK_SPOTS.filter(quickAdded).length;
@@ -529,16 +578,11 @@ function setupStep3() {
   return `
   <p class="lead">꼭 가고 싶은 곳을 넣으면 가까운 곳끼리 묶어 날짜별로 나눠 드려요.</p>
   <div class="searchbox">
-    <input type="search" placeholder="장소 검색 (예: 센소지, 팀랩)" data-search="must" value="${esc(S.ui.search.q)}" enterkeyhint="search">
+    <input type="search" placeholder="장소·지역 검색 (예: 신주쿠, 센소지)" data-search="must" value="${esc(S.ui.search.q)}" enterkeyhint="search">
     <button class="btn btn-primary" data-action="search" data-target="must">검색</button>
   </div>
   ${resultsHTML('must')}
-  <div class="chips-label">인기 스팟 빠르게 추가 <span class="muted">${addedCount ? `· ${addedCount}곳 추가됨 (다시 누르면 빠져요)` : '· 누르면 추가돼요'}</span></div>
-  <div class="chips">${QUICK_SPOTS.map((q) => {
-    const on = quickAdded(q);
-    const busy = S.ui.quickBusy === q;
-    return `<button class="chip quick ${on ? 'added' : ''}" data-action="quick-spot" data-q="${esc(q)}" aria-pressed="${on}" ${busy ? 'disabled' : ''}>${busy ? '<span class="spinner sm"></span>' : on ? '✓' : '＋'} ${esc(q)}</button>`;
-  }).join('')}</div>
+  ${popularHTML(addedCount)}
   <div class="section-title">선택한 메인 스팟 <span class="muted">${t.mustSpots.length}곳 · 관광 ${fmtDur(total)} / 여행 중 가용 약 ${fmtDur(cap)}</span></div>
   ${
     t.mustSpots.length
@@ -1890,6 +1934,12 @@ async function doSearch(target) {
   try {
     const res = await S.provider.searchText(q, { kind: target === 'hotel' ? 'hotel' : undefined });
     S.ui.search.results = target === 'hotel' ? res.map((p) => ({ ...p, kind: 'hotel' })) : res;
+    // 메인 스팟 검색: 첫 결과 지역 주변의 인기 스팟으로 빠른 추가 목록을 바꾼다
+    if (target === 'must' && res.length) {
+      S.ui.search.loading = false;
+      render({ fit: true });
+      return loadPopular(q, res[0]);
+    }
   } catch (e) {
     S.ui.search.error = explainError(e, '검색하지 못했어요');
   }
@@ -2051,6 +2101,7 @@ const actions = {
     if (n > 1 && tripNights(S.trip) < 1) return toast('출발 날짜가 도착 날짜보다 뒤여야 해요');
     if (n > 2 && !S.trip.hotel) return toast('숙소를 먼저 등록해 주세요');
     S.ui.step = n;
+    S.ui.popular = null;
     S.ui.search = { q: '', results: [], loading: false, error: '' };
     render({ resetScroll: true });
   },
@@ -2112,6 +2163,25 @@ const actions = {
     render();
   },
   'quick-spot': (d) => quickSpot(d.q),
+  'quick-place': (d) => {
+    const p = S.ui.popular?.list[Number(d.i)];
+    if (!p) return;
+    const i = S.trip.mustSpots.findIndex((m) => m.id === p.id);
+    if (i >= 0) {
+      const [removed] = S.trip.mustSpots.splice(i, 1);
+      save();
+      render({ fit: true });
+      toast(`${removed.name} 뺐어요`);
+      return;
+    }
+    addMust(p);
+    render({ fit: true });
+    toast(`${p.name} 추가`);
+  },
+  'popular-reset': () => {
+    S.ui.popular = null;
+    render();
+  },
   'must-stay': (d) => {
     const m = S.trip.mustSpots[Number(d.i)];
     m.stay = Math.max(15, m.stay + Number(d.d));

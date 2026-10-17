@@ -557,6 +557,9 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; font-weight: 800; line
 .chip.quick { display: inline-flex; align-items: center; gap: 4px; }
 .chip.added { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
 .chips-label .muted { font-weight: 500; }
+.chips-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
+.pop-reset { margin-left: auto; font-size: 12px; }
+.chip.quick small { font-weight: 600; }
 
 /* ---------- 순서·시간 편집 모드 */
 .edit-hint { margin: 12px 0 0; padding: 10px 13px; border-radius: 12px; background: var(--primary-soft); color: #9a2a17; font-size: 13px; font-weight: 700; border: 1.5px solid #ffb9ad; }
