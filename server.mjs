@@ -26,7 +26,7 @@ const TYPES = {
   '.ico': 'image/x-icon',
 };
 // 앱 실행에 필요한 경로만 공개
-const ALLOWED = /^\/(index\.html|config\.js|css\/[\w.-]+\.css|js\/[\w/.-]+\.js|vendor\/leaflet\/[\w.-]+\.(js|css|png))$/;
+const ALLOWED = /^\/(index\.html|config\.js|css\/[\w.-]+\.css|js\/[\w/.-]+\.js|vendor\/leaflet\/[\w.-]+\.(js|css|png)|assets\/sprites\/[\w.-]+\.png)$/;
 
 const server = http.createServer(async (req, res) => {
   const send = (code, body, type = 'text/plain; charset=utf-8') => {

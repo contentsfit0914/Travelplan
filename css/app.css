@@ -84,7 +84,6 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; font-weight: 800; line
 }
 .tour-btn.on { background: var(--ink); color: #fff; }
 .tour-btn .tour-av { width: 26px; height: 26px; display: grid; place-items: center; }
-.tour-btn .tour-av svg { width: 26px; height: 24px; }
 .tour-btn .tour-txt { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tour-btn b { color: var(--primary); }
 
@@ -132,7 +131,7 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; font-weight: 800; line
 
 /* 내 캐릭터 버튼(상단) */
 .av-btn { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--ink); background: var(--sun-soft); padding: 0; display: grid; place-items: center; overflow: hidden; box-shadow: var(--hard-sm); }
-.av-btn svg { width: 40px; height: 46px; margin-top: 8px; }
+.av-btn .spr { margin-top: 4px; }
 .av-btn:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--ink); }
 
 .steps { display: flex; gap: 6px; padding: 0 18px 10px; }
@@ -487,42 +486,39 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; font-weight: 800; line
 .pin.food, .pin.cafe { border-radius: 8px; }
 .pin.airport { background: var(--accent); color: #fff; }
 
-/* 내 캐릭터 마커 */
-.lf-anchor > .av-marker { position: absolute; left: 0; top: 0; transform: translate(-6%, -96%); }
+/* 내 캐릭터 마커(스프라이트) */
+.lf-anchor > .av-marker { position: absolute; left: 0; top: 0; transform: translate(-8%, -100%); }
 /* 서 있을 땐 핀 오른쪽 옆에 서서 핀을 가리지 않는다 */
-.av-marker { display: flex; flex-direction: column; align-items: center; cursor: pointer; width: 60px; pointer-events: auto; transform: translateX(44%); }
-.av-marker svg { width: 50px; height: 46px; filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff); }
-.av-marker.walking svg { animation: av-bob 0.5s ease-in-out infinite; }
-.av-tag { margin-top: -6px; font-size: 10.5px; font-weight: 800; background: #fff; border: 1.5px solid var(--ink); border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
+.av-marker { display: flex; flex-direction: column; align-items: center; cursor: pointer; width: 60px; pointer-events: auto; transform: translateX(40%); }
+.av-marker .spr { filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 1px 1px rgba(28, 36, 51, 0.25)); }
+.av-tag { margin-top: -4px; font-size: 10.5px; font-weight: 800; background: #fff; border: 1.5px solid var(--ink); border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
 
-/* 아바타 애니메이션(걷기) */
-.avatar .av-leg { transform-box: fill-box; transform-origin: 50% 50%; }
-.av-walk .av-legL { animation: av-stepL 0.5s ease-in-out infinite; }
-.av-walk .av-legR { animation: av-stepR 0.5s ease-in-out infinite; }
-.av-walk .av-body { transform-box: fill-box; transform-origin: 50% 100%; animation: av-sway 0.5s ease-in-out infinite; }
-.av-walk .av-ground { transform-box: fill-box; transform-origin: center; animation: av-ground 0.5s ease-in-out infinite; }
-@keyframes av-stepL { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
-@keyframes av-stepR { 0%, 100% { transform: translateY(-5px); } 50% { transform: translateY(0); } }
-@keyframes av-sway { 0%, 100% { transform: rotate(-2.5deg) translateY(0); } 50% { transform: rotate(2.5deg) translateY(-2px); } }
-@keyframes av-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-@keyframes av-ground { 0%, 100% { transform: scale(1); } 50% { transform: scale(0.88); } }
-@media (prefers-reduced-motion: reduce) { .av-walk *, .av-marker.walking svg { animation: none !important; } }
+/* 스프라이트: 4×2 시트, 8프레임 */
+.spr { display: inline-block; width: var(--s, 48px); height: var(--s, 48px); background-repeat: no-repeat; background-size: 400% 200%; background-position: 0 0; flex: none; }
+.spr-down { background-image: url('../assets/sprites/kurimanju-down.png'); }
+.spr-left { background-image: url('../assets/sprites/kurimanju-left.png'); }
+.spr-right { background-image: url('../assets/sprites/kurimanju-right.png'); }
+.spr-up { background-image: url('../assets/sprites/kurimanju-up.png'); }
+.spr-eat { background-image: url('../assets/sprites/kurimanju-eat.png'); }
+.spr.play { animation: spr8 0.9s steps(1, end) infinite; }
+.spr-eat.play { animation-duration: 1.6s; }
+@keyframes spr8 {
+  0% { background-position: 0% 0%; } 12.5% { background-position: 33.333% 0%; } 25% { background-position: 66.667% 0%; } 37.5% { background-position: 100% 0%; }
+  50% { background-position: 0% 100%; } 62.5% { background-position: 33.333% 100%; } 75% { background-position: 66.667% 100%; } 87.5% { background-position: 100% 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .spr.play { animation-duration: 3s; } }
 
-/* 캐릭터 꾸미기 시트 */
+/* 캐릭터 시트 */
 .av-sheet .section-title { margin-top: 16px; }
 .av-stage { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px 0 6px; }
 .av-stage-in { width: 190px; height: 190px; border-radius: 50%; background: var(--sun-soft); border: 2px solid var(--ink); display: grid; place-items: center; box-shadow: var(--hard); }
-.av-stage-in svg { width: 160px; height: 150px; margin-top: 6px; }
 .av-name { width: 180px; text-align: center; min-height: 42px; border-radius: 999px; border: 2px solid var(--line-strong); background: #fff; font-size: 16px; font-weight: 700; padding: 0 12px; }
 .av-name:focus { outline: 0; border-color: var(--ink); }
 .av-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 8px; }
+.av-opts.anims { grid-template-columns: repeat(5, 1fr); }
 .av-opt { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px 5px; border-radius: 12px; border: 2px solid var(--line); background: #fff; color: var(--ink2); }
-.av-opt svg { width: 44px; height: 40px; }
 .av-opt small { font-size: 10.5px; font-weight: 700; }
 .av-opt.on { border-color: var(--ink); background: var(--sun-soft); box-shadow: var(--hard-sm); color: var(--ink); }
-.av-opts.swatches { grid-template-columns: repeat(8, 1fr); gap: 8px; }
-.swatch { aspect-ratio: 1; border-radius: 50%; border: 2px solid var(--line-strong); background: var(--sw); padding: 0; }
-.swatch.on { border-color: var(--ink); box-shadow: var(--hard-sm); transform: scale(1.08); }
 
 /* Leaflet 기본 컨트롤 위치 보정 */
 .leaflet-top.leaflet-left { top: 44px; }

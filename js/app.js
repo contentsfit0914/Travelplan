@@ -51,7 +51,7 @@ import { RouteCache } from './routes.js';
 import { MapView } from './mapview.js';
 import { createDemoProvider } from './providers/demo.js';
 import { createGoogleProvider } from './providers/google.js';
-import { avatarSVG, cleanAvatar, defaultAvatar, randomAvatar, AVATAR_BODIES, AVATAR_EARS, AVATAR_COLORS, AVATAR_FACES, AVATAR_HATS, AVATAR_ITEMS } from './avatar.js';
+import { spriteHTML, setSprite, headingAnim, cleanAvatar, defaultAvatar, SPRITE_ANIMS } from './avatar.js';
 import { QUICK_SPOTS, DEMO_PLACES } from './data/demo-places.js';
 
 const CFG = window.TRAVELPLAN_CONFIG || {};
@@ -1191,7 +1191,7 @@ function keySectionHTML() {
 
 // ---------------------------------------------------------------- 내 캐릭터
 const myAvatar = () => cleanAvatar(S.settings.avatar || defaultAvatar());
-const avatarButton = () => `<button class="av-btn" data-action="open-avatar" aria-label="내 캐릭터 꾸미기">${avatarSVG(myAvatar(), { size: 40, ground: false })}</button>`;
+const avatarButton = () => `<button class="av-btn" data-action="open-avatar" aria-label="내 캐릭터">${spriteHTML('down', { size: 40 })}</button>`;
 
 function setAvatar(patch) {
   S.settings.avatar = cleanAvatar({ ...myAvatar(), ...patch });
@@ -1201,53 +1201,43 @@ function setAvatar(patch) {
 
 function avatarSheetHTML() {
   const av = myAvatar();
-  const opt = (field, list, make) =>
-    `<div class="av-opts">${list
-      .map(([k, label]) => `<button class="av-opt ${av[field] === k ? 'on' : ''}" data-action="av-set" data-field="${field}" data-value="${k}" aria-label="${label}" title="${label}">${make(k)}<small>${label}</small></button>`)
-      .join('')}</div>`;
-  const mini = (o) => avatarSVG({ ...av, ...o }, { size: 40, ground: false });
+  const preview = S.ui.avPreview || 'down';
   return `
   <div class="sheet-head"><b>내 캐릭터</b><button class="icon-btn" data-action="close-sheet" aria-label="닫기">${ICON.close}</button></div>
   <div class="sheet-body av-sheet">
-    <div class="av-stage"><div class="av-stage-in">${avatarSVG(av, { size: 150, walk: true })}</div>
+    <div class="av-stage"><div class="av-stage-in">${spriteHTML(preview, { size: 150, play: true })}</div>
       <input class="av-name" type="text" maxlength="8" placeholder="이름 (선택)" value="${esc(av.name)}" data-avname enterkeyhint="done">
     </div>
-    <p class="hint center">지도 위에서 이 캐릭터가 하루 동선을 따라 걸어요. 일정 화면의 <b>▶ 동선 따라가기</b>를 눌러 보세요.</p>
-    <div class="section-title">몸</div>
-    ${opt('body', AVATAR_BODIES, (k) => mini({ body: k, hat: 'none', item: 'none', face: 'dot', ears: 'none' }))}
-    <div class="section-title">귀</div>
-    ${opt('ears', AVATAR_EARS, (k) => mini({ ears: k, hat: 'none', item: 'none', face: 'dot' }))}
-    <div class="section-title">색</div>
-    <div class="av-opts swatches">${AVATAR_COLORS.map((c) => `<button class="swatch ${av.color === c ? 'on' : ''}" style="--sw:${c}" data-action="av-set" data-field="color" data-value="${c}" aria-label="색 ${c}"></button>`).join('')}</div>
-    <div class="section-title">표정</div>
-    ${opt('face', AVATAR_FACES, (k) => mini({ face: k, hat: 'none', item: 'none' }))}
-    <div class="section-title">모자</div>
-    ${opt('hat', AVATAR_HATS, (k) => mini({ hat: k, item: 'none' }))}
-    <div class="section-title">소지품</div>
-    ${opt('item', AVATAR_ITEMS, (k) => mini({ item: k }))}
-    <div class="row-actions">
-      <button class="btn" data-action="av-random">🎲 랜덤</button>
-      <button class="btn btn-primary" data-action="close-sheet">완료</button>
-    </div>
+    <p class="hint center">쿠리만쥬가 지도 위에서 하루 동선을 따라 걷고, 맛집·카페에 도착하면 한잔해요. 일정 화면의 <b>▶ 동선 따라가기</b>를 눌러 보세요.</p>
+    <div class="section-title">동작 미리보기</div>
+    <div class="av-opts anims">${Object.entries(SPRITE_ANIMS)
+      .map(([k, label]) => `<button class="av-opt ${preview === k ? 'on' : ''}" data-action="av-preview" data-v="${k}" aria-label="${label}">${spriteHTML(k, { size: 44, play: preview === k })}<small>${label}</small></button>`)
+      .join('')}</div>
+    <div class="row-actions"><button class="btn btn-primary wide" data-action="close-sheet">완료</button></div>
   </div>`;
 }
 
-// 지도용 아바타 DOM. 설정이 같으면 같은 요소를 재사용(애니메이션이 끊기지 않도록)
+// 지도용 아바타 DOM. 같은 요소를 재사용하고 동작(방향·걷기·먹기)만 바꾼다
 const avatarElCache = new Map();
-function avatarEl(walk) {
+function avatarEl(anim = 'down', play = false) {
   const av = myAvatar();
   const key = JSON.stringify(av);
   if (!avatarElCache.has(key)) {
     const el = document.createElement('div');
     el.className = 'av-marker';
-    el.innerHTML = `${avatarSVG(av, { size: 46 })}${av.name ? `<span class="av-tag">${esc(av.name)}</span>` : ''}`;
+    el.innerHTML = `${spriteHTML('down', { size: 56 })}${av.name ? `<span class="av-tag">${esc(av.name)}</span>` : ''}`;
     avatarElCache.set(key, el);
   }
   const el = avatarElCache.get(key);
-  // 걷기 상태는 같은 요소에 클래스만 바꾼다(지도 마커를 새로 만들지 않도록)
-  el.classList.toggle('walking', !!walk);
-  el.querySelector('svg')?.classList.toggle('av-walk', !!walk);
+  setSprite(el, anim, play);
   return el;
+}
+
+// 서 있을 때의 동작: 맛집·카페에 있으면 먹기, 아니면 앞을 보고 서기
+function idleAnim() {
+  const f = S.ui.focus && findStop(S.ui.focus);
+  if (f && f.di === S.ui.day && (f.s.kind === 'food' || f.s.kind === 'cafe')) return ['eat', true];
+  return ['down', false];
 }
 
 // 캐릭터가 서 있을 곳: 재생 중엔 재생 위치, 아니면 고른 장소 → 그날 출발점 → 숙소
@@ -1285,7 +1275,7 @@ function tourPlan(di) {
   };
   let prev = r.origin;
   for (const row of r.rows) {
-    append(row.leg, prev, row.stop, { uid: row.stop.uid, name: row.stop.fixed ? '숙소 · 짐 맡기기' : row.stop.name, time: row.arrive, icon: KIND[row.stop.kind]?.icon || '📍' });
+    append(row.leg, prev, row.stop, { uid: row.stop.uid, kind: row.stop.kind, name: row.stop.fixed ? '숙소 · 짐 맡기기' : row.stop.name, time: row.arrive, icon: KIND[row.stop.kind]?.icon || '📍' });
     prev = row.stop;
   }
   const home = dayHotel(t, di);
@@ -1299,7 +1289,7 @@ function tourPlan(di) {
   let from = 0;
   for (const m of marks) {
     steps.push({ type: 'move', from, to: m.d, ms: total ? ((m.d - from) / total) * moveMs : 0 });
-    steps.push({ type: 'stop', mark: m, ms: 1000 });
+    steps.push({ type: 'stop', mark: m, ms: m.kind === 'food' || m.kind === 'cafe' ? 1800 : 1000 });
     from = m.d;
   }
   return { di, pts, cum, marks, steps };
@@ -1338,7 +1328,14 @@ function startTour(di) {
     if (!step) return finishTour();
     if (step.type === 'move') {
       const d = step.from + (step.to - step.from) * Math.min(1, el / (step.ms || 1));
+      const prev = tr.pos;
       tr.pos = posAt(tr, d);
+      const dir = headingAnim(prev, tr.pos) || tr.anim || 'down';
+      if (dir !== tr.anim || !tr.playing) {
+        tr.anim = dir;
+        tr.playing = true;
+        setSprite(avatarEl(dir, true), dir, true);
+      }
       mapView.moveAvatar(tr.pos);
       if (!mapView.contains(tr.pos)) mapView.panTo(tr.pos);
     }
@@ -1350,6 +1347,11 @@ function startTour(di) {
 function arriveAt(mark) {
   const tr = S.tour;
   tr.text = `${fmtTime(mark.time)} ${mark.icon} ${mark.name}`;
+  // 장소에 멈춘 동안: 맛집·카페면 먹기, 아니면 앞을 보고 서기
+  const eat = mark.kind === 'food' || mark.kind === 'cafe';
+  tr.anim = eat ? 'eat' : 'down';
+  tr.playing = eat;
+  setSprite(avatarEl(tr.anim, eat), tr.anim, eat);
   tr.pos = posAt(tr, mark.d);
   mapView.moveAvatar(tr.pos);
   mapView.panTo(tr.pos);
@@ -1389,7 +1391,8 @@ function stopTour(repaint = true) {
 
 function placeAvatar(pos = avatarPos()) {
   if (!mapView?.map) return;
-  mapView.setAvatar(avatarEl(!!S.tour), pos, () => actions['open-avatar']());
+  const [anim, play] = S.tour ? [S.tour.anim || 'down', !!S.tour.playing] : idleAnim();
+  mapView.setAvatar(avatarEl(anim, play), pos, () => actions['open-avatar']());
 }
 
 function renderTourBar() {
@@ -1400,8 +1403,8 @@ function renderTourBar() {
   const show = S.ui.screen === 'plan' && di >= 0 && t.days[di]?.stops.some((s) => !s.fixed);
   if (!show) return (bar.innerHTML = '');
   bar.innerHTML = S.tour
-    ? `<button class="tour-btn on" data-action="tour-stop" aria-label="동선 재생 멈추기"><span class="tour-av">${avatarSVG(myAvatar(), { size: 22, ground: false, walk: true })}</span><span class="tour-txt">${esc(S.tour.text)}</span><b>■</b></button>`
-    : `<button class="tour-btn" data-action="tour-play" aria-label="캐릭터가 오늘 동선을 따라갑니다"><span class="tour-av">${avatarSVG(myAvatar(), { size: 22, ground: false })}</span>▶ 동선 따라가기</button>`;
+    ? `<button class="tour-btn on" data-action="tour-stop" aria-label="동선 재생 멈추기"><span class="tour-av">${spriteHTML('right', { size: 26, play: true })}</span><span class="tour-txt">${esc(S.tour.text)}</span><b>■</b></button>`
+    : `<button class="tour-btn" data-action="tour-play" aria-label="캐릭터가 오늘 동선을 따라갑니다"><span class="tour-av">${spriteHTML('down', { size: 26 })}</span>▶ 동선 따라가기</button>`;
 }
 
 function settingsHTML() {
@@ -2419,13 +2422,9 @@ const actions = {
     S.ui.sheet = { type: 'avatar', resetScroll: true };
     render();
   },
-  'av-set': (d) => {
-    setAvatar({ [d.field]: d.value });
-    render();
-  },
-  'av-random': () => {
-    setAvatar(randomAvatar(myAvatar().name));
-    render();
+  'av-preview': (d) => {
+    S.ui.avPreview = d.v;
+    renderSheet();
   },
   'tour-play': () => startTour(S.ui.day),
   'tour-stop': () => stopTour(),
