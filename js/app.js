@@ -760,10 +760,10 @@ function anchorName(a) {
 function gapHTML(g) {
   const late = g.dev === 0 ? '목표 시각' : `목표보다 ${fmtDur(Math.abs(g.dev))} ${g.dev > 0 ? '늦음' : '빠름'}`;
   return `<div class="gap">
-    <div class="stop-time"><b>${fmtTime(g.at)}</b><small>${g.label}</small></div>
     <div class="gap-ico">🍽</div>
     <div class="gap-card">
       <button class="gap-main" data-action="open-rec" data-tab="food" data-gap="${g.type}">
+        <span class="when">${fmtTime(g.at)} · ${g.label}</span>
         <b>${g.label} 식당 고르기 ›</b>
         <small>${esc(anchorName(g.anchor))}에서 ${g.budget <= 15 ? `도보 ${g.budget}분` : `${g.budget}분`} 이내 · <em class="${g.ok ? 'ok-txt' : 'warn-txt'}">${late}</em></small>
       </button>
@@ -773,13 +773,12 @@ function gapHTML(g) {
 }
 
 function anchorHTML(time, icon, text, sub = '', cls = '') {
-  return `<div class="anchor ${cls}"><span class="a-time">${fmtTime(time)}</span><span class="a-ico">${icon}</span><span>${text}${sub ? `<small class="muted"> · ${sub}</small>` : ''}</span></div>`;
+  return `<div class="anchor ${cls}"><span class="a-ico">${icon}</span><span class="a-txt"><span class="a-time">${fmtTime(time)}</span> ${text}${sub ? `<small class="muted"> · ${sub}</small>` : ''}</span></div>`;
 }
 
 function freeHTML(from, to, anchor) {
   const a = anchor?.uid && !anchor.fixed ? anchor.uid : anchor?.fixed ? 'hotel' : 'origin';
   return `<div class="free">
-    <span class="free-line"></span>
     <button data-action="open-rec" data-tab="sight" data-anchor="${a}">
       <span>⏳ ${fmtTime(from)}–${fmtTime(to)} <b>${fmtDur(to - from)} 비어 있음</b></span>
       <small>근처 추천 ›</small>
@@ -799,19 +798,24 @@ function stopHTML(row, di, edit = false, day = null) {
   const classes = ['stop', S.ui.focus === s.uid ? 'is-active' : '', s.fixed ? 'is-fixed' : '', edit ? 'is-edit' : '', S.ui.flash === s.uid ? 'flash' : ''].join(' ');
   const name = s.fixed === 'arrival' ? '숙소 도착 · 짐 풀고 쉬기' : s.fixed === 'move' ? '숙소 이동 · 짐 맡기기' : esc(s.name);
   const meta = s.fixed ? esc(s.name) : `${s.must ? '<em class="badge">메인</em>' : ''}${s.meal ? `<em class="badge meal">${MEAL_LABEL[s.meal]}</em>` : ''}${ratingHTML(s)} ${placeMeta(s)}`;
-  const head = `
-    <div class="stop-time"><b>${fmtTime(row.arrive)}</b><small>~${fmtTime(row.depart)}</small></div>
-    <div class="stop-num">${row.num ?? '🏨'}</div>`;
+  const head = `<div class="stop-num">${row.num ?? '🏨'}</div>`;
+  const when = `<span class="when">${fmtTime(row.arrive)} – ${fmtTime(row.depart)}<small> · ${fmtDur(s.stay)}</small></span>`;
+  const photo = s.fixed ? null : photoOf(s);
+  const thumb = `<span class="sb-thumb ${photo ? '' : 'ph'}">${photo ? `<img src="${esc(photo)}" alt="" loading="lazy">` : s.fixed ? '🏨' : KIND[s.kind]?.icon || '📍'}</span>`;
   if (!edit) {
     const quick = S.ui.quick === s.uid;
     const mv = quick ? moveability(day, row.index) : null;
     return `<div class="${classes} ${quick ? 'quick' : ''}" style="--c:${color(di)}" data-uid="${esc(s.uid)}">${head}
     <div class="stop-card">
       <button class="stop-body" data-action="open-stop" data-uid="${esc(s.uid)}">
-        <span class="stop-name">${s.fixed ? '' : `${KIND[s.kind]?.icon || '📍'} `}${name}</span>
-        <span class="stop-meta">${meta}</span>
-        ${row.info ? `<span class="info">${esc(row.info)}</span>` : ''}
-        ${row.warn ? `<span class="warn">⚠ ${esc(row.warn)}</span>` : ''}
+        <span class="sb-main">
+          ${when}
+          <span class="stop-name">${name}</span>
+          <span class="stop-meta">${meta}</span>
+          ${row.info ? `<span class="info">${esc(row.info)}</span>` : ''}
+          ${row.warn ? `<span class="warn">⚠ ${esc(row.warn)}</span>` : ''}
+        </span>
+        ${thumb}
       </button>
       ${
         quick
@@ -831,7 +835,8 @@ function stopHTML(row, di, edit = false, day = null) {
   const u = esc(s.uid);
   return `<div class="${classes}" style="--c:${color(di)}" data-uid="${u}">${head}
     <div class="stop-body edit-body">
-      <span class="stop-name">${s.fixed ? '' : `${KIND[s.kind]?.icon || '📍'} `}${name}</span>
+      ${when}
+      <span class="stop-name">${name}</span>
       <div class="edit-ctrl">
         <div class="stay mini" role="group" aria-label="머무는 시간">
           <button data-action="stay" data-uid="${u}" data-d="-15" aria-label="머무는 시간 15분 줄이기">−</button>
@@ -961,7 +966,7 @@ function dayHTML(di) {
     </div>
     ${edit ? `<div class="edit-hint">▲▼로 순서를 바꾸면 도착 시간과 이동 경로가 바로 다시 계산돼요.</div>` : ''}
     ${!t.hotel ? `<div class="banner banner-err">숙소가 없어 출발·복귀 동선을 계산할 수 없어요. <button class="link" data-action="edit-setup" data-step="2">숙소 설정</button></div>` : ''}
-    <div class="timeline">${parts.join('')}</div>
+    <div class="timeline" style="--c:${color(di)}">${parts.join('')}</div>
     ${!edit && real.length >= 2 ? '<p class="lp-hint">💡 일정 카드를 꾹 누르면 바로 순서를 바꿀 수 있어요</p>' : ''}
     ${
       !real.length
