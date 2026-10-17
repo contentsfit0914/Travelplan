@@ -826,16 +826,15 @@ function anchorName(a) {
 }
 
 function gapHTML(g) {
-  const late = g.dev === 0 ? '목표 시각' : `목표보다 ${fmtDur(Math.abs(g.dev))} ${g.dev > 0 ? '늦음' : '빠름'}`;
+  // 식사 미정 자리: "18:00 저녁 추가하기 [+]" 한 줄
   return `<div class="gap">
     <div class="gap-ico">${icon('food', 18)}</div>
     <div class="gap-card">
-      <button class="gap-main" data-action="open-rec" data-tab="food" data-gap="${g.type}">
-        <span class="when">${fmtTime(g.at)} · ${g.label}</span>
-        <b>${g.label} 식당 고르기 ›</b>
-        <small>${esc(anchorName(g.anchor))}에서 ${g.budget <= 15 ? `도보 ${g.budget}분` : `${g.budget}분`} 이내 · <em class="${g.ok ? 'ok-txt' : 'warn-txt'}">${late}</em></small>
+      <button class="gap-main" data-action="open-rec" data-tab="food" data-gap="${g.type}" aria-label="${fmtTime(g.at)} ${g.label} 추가하기">
+        <span class="when">${fmtTime(g.at)}</span>
+        <b>${g.label} 추가하기</b>
+        <span class="gap-plus" aria-hidden="true">+</span>
       </button>
-      <button class="gap-skip" data-action="skip-meal" data-meal="${g.type}" aria-label="${g.label} 건너뛰기">건너뛰기</button>
     </div>
   </div>`;
 }
@@ -2541,20 +2540,6 @@ const actions = {
     save();
     render();
     toast(now === 'AUTO' ? '이동수단: 자동(거리 기준)' : `이동수단: ${MODES[now].label}`);
-  },
-  'skip-meal': (d) => {
-    const day = S.trip.days[S.ui.day];
-    day.skipMeals = [...new Set([...(day.skipMeals || []), d.meal])];
-    save();
-    render();
-    toast(`이 날 ${MEAL_LABEL[d.meal]}은 비워 둘게요`, {
-      label: '되돌리기',
-      fn: () => {
-        day.skipMeals = day.skipMeals.filter((m) => m !== d.meal);
-        save();
-        render();
-      },
-    });
   },
   optimize: () => {
     const di = S.ui.day;
