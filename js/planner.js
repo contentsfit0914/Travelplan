@@ -176,6 +176,35 @@ export function isOpenDuring(place, dateStr, from, to) {
   return openIntervals(periods).some(([o, c]) => [0, WEEK, -WEEK].some((k) => o + k < b && c + k > a));
 }
 
+// [from, to] 중 문을 닫은 시간(분). 영업시간 정보가 없으면 0
+export function closedMinutes(place, dateStr, from, to) {
+  const periods = place.hours?.periods;
+  if (!periods?.length || to <= from) return 0;
+  const base = weekday(dateStr) * 1440;
+  const a = base + from;
+  const b = base + to;
+  // 겹치는 영업 구간을 모아 합친 뒤 열린 시간을 뺀다
+  const open = [];
+  for (const [o, c] of openIntervals(periods))
+    for (const k of [0, WEEK, -WEEK]) {
+      const lo = Math.max(a, o + k);
+      const hi = Math.min(b, c + k);
+      if (hi > lo) open.push([lo, hi]);
+    }
+  open.sort((x, y) => x[0] - y[0]);
+  let covered = 0;
+  let cur = null;
+  for (const [lo, hi] of open) {
+    if (cur && lo <= cur[1]) cur[1] = Math.max(cur[1], hi);
+    else {
+      if (cur) covered += cur[1] - cur[0];
+      cur = [lo, hi];
+    }
+  }
+  if (cur) covered += cur[1] - cur[0];
+  return b - a - covered;
+}
+
 export function hoursWarning(stop, dateStr, arrive, depart) {
   const periods = stop.hours?.periods;
   if (!periods?.length) return null;
@@ -385,6 +414,44 @@ export function optimizeDay(trip, di) {
   return arrangeStops(trip, di, trip.days[di].stops);
 }
 
+// 하루 순서의 비용: 이동시간 + 영업 외 시간(분당 3) + 식사 시각 차이(분당 2, 카페 0.2) + 하루 끝을 넘긴 시간(분당 1)
+export const CLOSED_PENALTY = 3;
+export function dayCost(trip, di, stops, segFn = estimateSeg(trip)) {
+  const sim = computeDay({ ...trip, days: trip.days.map((d, k) => (k === di ? { ...d, stops } : d)) }, di, segFn);
+  let cost = sim.totals.travel + sim.overflow;
+  for (const r of sim.rows) {
+    if (r.stop.fixed) continue;
+    cost += closedMinutes(r.stop, sim.date, r.arrive, r.depart) * CLOSED_PENALTY;
+    if (r.stop.meal) cost += Math.abs(r.arrive - targetTime(trip, r.stop)) * 2;
+    else if (r.stop.kind === 'cafe') cost += Math.abs(r.arrive - CAFE_TIME) * 0.2;
+  }
+  return cost;
+}
+
+// 순서 다듬기: 장소 하나를 다른 자리로 옮겨 비용이 줄면 받아들인다(영업시간에 맞춰 앞당기거나 미루는 효과)
+export function improveOrder(trip, di, stops, segFn = estimateSeg(trip)) {
+  let cur = [...stops];
+  let best = dayCost(trip, di, cur, segFn);
+  const lastFixed = cur.reduce((m, s, i) => (s.fixed ? i : m), -1);
+  for (let guard = 0; guard < 30; guard++) {
+    let move = null;
+    for (let i = 0; i < cur.length; i++) {
+      if (cur[i].fixed || i <= lastFixed) continue;
+      const rest = cur.filter((_, k) => k !== i);
+      for (let j = lastFixed + 1; j <= rest.length; j++) {
+        if (j === i) continue;
+        const trial = [...rest.slice(0, j), cur[i], ...rest.slice(j)];
+        const c = dayCost(trip, di, trial, segFn);
+        if (c + 0.5 < best && (!move || c < move.c)) move = { trial, c };
+      }
+    }
+    if (!move) break;
+    cur = move.trial;
+    best = move.c;
+  }
+  return cur;
+}
+
 // 주어진 장소들을 그날 동선으로 배치: 관광지는 이동 최소, 식사·카페는 목표 시각 근처
 export function arrangeStops(trip, di, list) {
   const est = estimator(trip);
@@ -401,22 +468,34 @@ export function arrangeStops(trip, di, list) {
   ];
   const segFn = estimateSeg(trip);
   for (const m of meals.sort((a, b) => targetTime(trip, a) - targetTime(trip, b))) {
-    const target = targetTime(trip, m);
     let best = { i: stops.length, score: Infinity };
     // 숙소 도착(짐 풀기) 전 식사는 공항 근처(3km 이내) 식당일 때만
     const origin = dayOrigin(trip, di);
     const beforeHotelOk = m.meal && origin?.kind === 'airport' && distKm(origin, m) <= 3;
     for (let i = beforeHotelOk ? 0 : fixed.length; i <= stops.length; i++) {
       const trial = [...stops.slice(0, i), m, ...stops.slice(i)];
-      const sim = computeDay({ ...trip, days: trip.days.map((d, k) => (k === di ? { ...d, stops: trial } : d)) }, di, segFn);
-      const row = sim.rows.find((r) => r.stop === m);
-      // 식사는 시각을 강하게(분당 2), 카페는 약하게(분당 0.2) 반영
-      const score = sim.totals.travel + Math.abs(row.arrive - target) * (m.meal ? 2 : 0.2);
+      // 이동시간 + 식사 시각 차이 + 영업시간(dayCost)
+      const score = dayCost(trip, di, trial, segFn);
       if (score < best.score) best = { i, score };
     }
     stops = [...stops.slice(0, best.i), m, ...stops.slice(best.i)];
   }
-  return stops;
+  // 영업시간·하루 끝에 맞춰 순서를 다듬는다(예: 19시에 닫는 곳이 맨 뒤에 있으면 앞으로)
+  return improveOrder(trip, di, stops, segFn);
+}
+
+// 장소 하나를 하루에 끼울 자리: 이동시간·영업시간·식사 시각을 함께 본다
+export function insertIndex(trip, di, cand, minIndex = 0) {
+  const day = trip.days[di];
+  const segFn = estimateSeg(trip);
+  const base = dayCost(trip, di, day.stops, segFn);
+  let best = { index: day.stops.length, cost: Infinity };
+  for (let i = minIndex; i <= day.stops.length; i++) {
+    const trial = [...day.stops.slice(0, i), cand, ...day.stops.slice(i)];
+    const cost = dayCost(trip, di, trial, segFn);
+    if (cost < best.cost) best = { index: i, cost };
+  }
+  return { index: best.index, extra: Math.max(0, Math.round(best.cost - base)) };
 }
 
 // --- 메인 스팟 자동 배분 ----------------------------------------------------
@@ -552,7 +631,11 @@ export function autoDistribute(trip, spots) {
     return list.reduce((s, p) => s + p.stay, 0) + tourCost(order, h, est);
   };
   // 그날 스타일에 맞는 스팟인지: 휴식=숙소 도보 20분 안, 쇼핑=쇼핑 장소, 귀국일=가깝고 짧은 곳
+  const segFn = estimateSeg(trip);
+  const wins = Array.from({ length: n }, (_, i) => dayWindow(trip, i, segFn));
   const allowed = (s, di) => {
+    // 그 요일에 쉬거나, 그날 다닐 수 있는 시간에 문을 열지 않는 곳은 그날에 넣지 않는다
+    if (!isOpenDuring(s, dayDate(trip, di), wins[di].start, wins[di].rawEnd)) return false;
     if (di === last && !okOnLastDay(trip, s, est)) return false;
     const st = dayStyle(trip, di);
     if (st === 'rest') {

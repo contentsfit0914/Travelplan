@@ -20,6 +20,9 @@ import {
   departurePlan,
   okOnLastDay,
   isOpenDuring,
+  closedMinutes,
+  arrangeStops as arrange,
+  insertIndex,
 } from '../js/planner.js';
 import { syncTrip, sanitizeTrip } from '../js/store.js';
 import { DEMO_PLACES } from '../js/data/demo-places.js';
@@ -450,4 +453,47 @@ test('isOpenDuring: 그 요일 휴무면 false, 영업시간이 하루 가용 �
   const late = { hours: { periods: [{ open: { day: 5, hour: 22, minute: 0 }, close: { day: 6, hour: 2, minute: 0 } }] } };
   assert.equal(isOpenDuring(late, '2026-11-20', 23 * 60, 24 * 60), true);
   assert.equal(isOpenDuring(late, '2026-11-20', 9 * 60, 21 * 60), false);
+});
+
+// 매일 10:00~19:00 영업
+const hours10to19 = { periods: [0, 1, 2, 3, 4, 5, 6].map((d) => ({ open: { day: d, hour: 10, minute: 0 }, close: { day: d, hour: 19, minute: 0 } })) };
+
+test('closedMinutes: 머무는 시간 중 영업 외 시간을 분으로 센다', () => {
+  const p = { hours: hours10to19 };
+  assert.equal(closedMinutes(p, '2026-11-20', 18 * 60 + 39, 23 * 60 + 39), 4 * 60 + 39, '19:00 이후 4시간 39분');
+  assert.equal(closedMinutes(p, '2026-11-20', 14 * 60, 19 * 60), 0, '14~19시는 전부 영업 중');
+  assert.equal(closedMinutes(p, '2026-11-20', 9 * 60, 11 * 60), 60, '10시 전 1시간');
+  assert.equal(closedMinutes({ hours: null }, '2026-11-20', 9 * 60, 23 * 60), 0, '정보 없으면 0');
+});
+
+test('동선 배치: 19시에 닫는 곳에 5시간 머물면 맨 뒤가 아니라 영업시간 안에 들어가도록 앞당긴다', () => {
+  const t = trip();
+  const park = { ...byId('ueno-park'), id: 'park', uid: 'park', name: '치이카와 파크', stay: 300, hours: hours10to19 };
+  const list = [{ ...byId('sensoji'), stay: 60 }, { ...byId('akiba'), stay: 60 }, { ...byId('skytree'), stay: 60 }, park];
+  const stops = arrange(t, 2, list);
+  const r = computeDay({ ...t, days: t.days.map((d, k) => (k === 2 ? { ...d, stops } : d)) }, 2, estimateSeg(t));
+  const row = r.rows.find((x) => x.stop.uid === 'park');
+  assert.ok(row.depart <= 19 * 60, `파크는 19:00 전에 나와야 함 (${fmtTime(row.arrive)}–${fmtTime(row.depart)})`);
+  assert.equal(closedMinutes(park, r.date, row.arrive, row.depart), 0);
+});
+
+test('insertIndex: 추천에서 추가할 때도 영업시간에 맞는 자리에 끼운다', () => {
+  const t = trip();
+  t.days[2].stops = [{ ...byId('sensoji'), stay: 60 }, { ...byId('akiba'), stay: 60 }, { ...byId('skytree'), stay: 60 }];
+  const park = { ...byId('ueno-park'), id: 'park', uid: 'park', name: '치이카와 파크', stay: 300, hours: hours10to19, mode: 'AUTO', meal: null };
+  const { index } = insertIndex(t, 2, park, 0);
+  t.days[2].stops.splice(index, 0, park);
+  const r = computeDay(t, 2, estimateSeg(t));
+  const row = r.rows.find((x) => x.stop.uid === 'park');
+  assert.ok(row.depart <= 19 * 60, `${fmtTime(row.arrive)}–${fmtTime(row.depart)}`);
+});
+
+test('자동 배분: 그 요일에 쉬는 곳은 그날에 넣지 않는다', () => {
+  const t = trip(); // 11/19(목)~11/23(월)
+  // 금요일(5)만 쉬는 곳
+  const periods = [0, 1, 2, 3, 4, 6].map((d) => ({ open: { day: d, hour: 10, minute: 0 }, close: { day: d, hour: 18, minute: 0 } }));
+  const spots = ['ueno-park', 'sensoji', 'akiba', 'tnm', 'skytree'].map((id) => ({ ...byId(id), stay: 60, hours: { periods } }));
+  const dist = autoDistribute(t, spots);
+  assert.equal(dist[1].filter((s) => !s.fixed).length, 0, '금요일(D2)에는 아무것도 넣지 않음');
+  assert.equal(dist.flat().filter((s) => !s.fixed).length, 5, '다른 날에 모두 들어감');
 });

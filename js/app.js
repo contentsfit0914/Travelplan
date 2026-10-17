@@ -14,6 +14,7 @@ import {
   optimizeDay,
   classifyPlace,
   bestInsert,
+  insertIndex,
   timedInsert,
   estimator,
   estimateSeg,
@@ -1934,7 +1935,7 @@ function addCandidate(id) {
     const target = Math.min(Math.max(15 * 60, r.win.start + 90), r.win.end - 60);
     index = timedInsert(t, di, stop, target, minInsertIndex(day)).index;
   }
-  if (index == null) index = Math.max(minInsertIndex(day), bestInsert(day.stops, dayHotel(t, di), stop, est()).index);
+  if (index == null) index = insertIndex(t, di, stop, minInsertIndex(day)).index;
   day.stops.splice(index, 0, stop);
   save();
   S.ui.focus = stop.uid;
@@ -2640,7 +2641,7 @@ const actions = {
     S.trip.days[f.di].stops.splice(f.i, 1);
     const target = S.trip.days[to];
     f.s.meal = null;
-    target.stops.splice(Math.max(minInsertIndex(target), bestInsert(target.stops, dayHotel(S.trip, Number(d.day)), f.s, est()).index), 0, f.s);
+    target.stops.splice(insertIndex(S.trip, Number(d.day), f.s, minInsertIndex(target)).index, 0, f.s);
     save();
     S.ui.sheet = null;
     render();
