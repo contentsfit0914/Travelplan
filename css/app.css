@@ -240,6 +240,22 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; font-weight: 800; line
 .num { width: 26px; height: 26px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 13px; font-weight: 800; display: grid; place-items: center; flex: none; }
 
 /* ---------- 시간 설정 */
+/* 날짜별 여행 스타일 카드 */
+.style-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.style-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 6px 9px; border-radius: 14px; border: 2px solid var(--line); background: var(--card); color: var(--ink); min-height: 96px; }
+.style-card:active { transform: translate(1px, 1px); }
+.style-card .sc-day { display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
+.style-card .sc-day b { color: var(--c); font-size: 14px; }
+.style-card .sc-day small { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.style-card .sc-ico { font-size: 22px; line-height: 1; margin-top: 2px; }
+.style-card .sc-style { font-size: 13px; font-weight: 800; }
+.style-card.st-rest { background: var(--ok-soft); border-color: var(--ok); }
+.style-card.st-shop { background: var(--sun-soft); border-color: var(--sun); }
+.style-card.st-free { background: var(--accent-soft); border-color: var(--accent); }
+.style-card.st-sight { border-color: var(--ink); box-shadow: var(--hard-sm); }
+.style-legend { margin: 8px 0 0; padding-left: 0; list-style: none; font-size: 12px; color: var(--ink2); display: grid; gap: 3px; }
+.style-legend b { font-weight: 800; margin-right: 2px; }
+.badge.style { background: var(--accent-soft); color: #115e5d; border-color: #9ad3d0; }
 .cap-list { display: flex; flex-direction: column; gap: 8px; background: var(--card); border: 2px solid var(--line); border-radius: var(--radius); padding: 13px; }
 .cap-row { display: grid; grid-template-columns: 30px 62px 1fr auto; align-items: center; gap: 8px; font-size: 13px; }
 .cap-day { font-weight: 800; color: var(--c); }

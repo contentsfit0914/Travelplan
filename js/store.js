@@ -32,6 +32,7 @@ export function defaultTrip() {
     dinner: '18:30',
     mealMinutes: 75,
     mealTolerance: 30, // 식사시간 오차범위(분)
+    dayStyles: [], // 날짜별 여행 스타일: sight(관광)·rest(휴식)·shop(쇼핑)·free(자유). 비어 있으면 관광
     hotels: [], // 등록한 숙소(체크인·체크아웃 시간 포함)
     nightHotel: [], // 밤마다 묵는 숙소 id
     hotel: null, // 첫날 묵는 숙소(호환용, syncTrip 이 채움)
@@ -54,6 +55,7 @@ export function syncTrip(trip) {
   trip.nights = Math.min(9, Math.max(1, Number.isFinite(n) ? n : 1));
   ensureDays(trip);
   syncNights(trip);
+  trip.dayStyles = Array.from({ length: trip.days.length }, (_, i) => (DAY_STYLES.includes(trip.dayStyles?.[i]) ? trip.dayStyles[i] : 'sight'));
   trip.hotel = trip.hotels.length ? nightHotel(trip, 0) : null;
   const last = trip.days.length - 1;
   trip.days.forEach((d, i) => {
@@ -128,6 +130,7 @@ const write = (k, v) => {
 // --- 입력 정리(sanitize) ------------------------------------------------------
 // 공유받은 JSON 파일은 외부 입력이다. 화면에 들어가는 모든 값을 형식·길이·허용 목록으로 다시 만든다.
 const KINDS = ['sight', 'food', 'cafe', 'hotel'];
+export const DAY_STYLES = ['sight', 'rest', 'shop', 'free'];
 const STOP_MODES = ['AUTO', 'WALK', 'TRANSIT', 'DRIVE'];
 const MEALS = ['breakfast', 'lunch', 'dinner'];
 const AIRPORT_CODES = ['HND', 'NRT'];
@@ -250,6 +253,7 @@ export function sanitizeTrip(raw) {
     breakfastOn: typeof t.breakfastOn === 'boolean' ? t.breakfastOn : d.breakfastOn,
     breakfast: time('breakfast'),
     mealTolerance: pick('mealTolerance', [10, 30, 60, 120]),
+    dayStyles: Array.isArray(t.dayStyles) ? t.dayStyles.slice(0, 10).map((x) => (DAY_STYLES.includes(x) ? x : 'sight')) : [],
     people: clamp(Math.trunc(num(t.people, d.people)), 1, 20),
     baseMode: ['TRANSIT', 'DRIVE'].includes(t.baseMode) ? t.baseMode : d.baseMode,
     walkLimitKm: [0.5, 1, 1.5].includes(num(t.walkLimitKm)) ? num(t.walkLimitKm) : d.walkLimitKm,

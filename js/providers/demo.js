@@ -23,7 +23,7 @@ export function createDemoProvider() {
 
   async function nearby(kind, center, radius) {
     return all
-      .filter((p) => p.kind === kind)
+      .filter((p) => (kind === 'shop' ? p.types.some((t) => ['shopping_mall', 'department_store', 'market'].includes(t)) : p.kind === kind))
       .map((p) => ({ p, d: distKm(center, p) }))
       .filter(({ d }) => d * 1000 <= Math.max(radius * 2.5, 2500))
       .sort((a, b) => a.d - b.d)

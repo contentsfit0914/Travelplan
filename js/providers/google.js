@@ -30,6 +30,7 @@ const NEARBY_TYPES = {
   ],
   food: [['restaurant']],
   cafe: [['cafe', 'coffee_shop', 'dessert_shop'], ['cafe']],
+  shop: [['shopping_mall', 'department_store', 'market'], ['shopping_mall']],
 };
 
 let loading = null;
@@ -133,6 +134,7 @@ export async function createGoogleProvider(key) {
       };
       if (kind === 'food') req.includedType = 'restaurant';
       if (kind === 'cafe') req.includedType = 'cafe';
+      if (kind === 'shop') req.includedType = 'shopping_mall';
       const { places } = await Place.searchByText(req);
       return (places || []).filter(alive).map(normalizePlace);
     }

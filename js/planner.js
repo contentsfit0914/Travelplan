@@ -503,6 +503,17 @@ function assignMeals(trip, foods, out) {
   return rest; // 남는 식사 자리가 없으면 일반 장소로 배치
 }
 
+// 날짜별 여행 스타일
+export const DAY_STYLE = {
+  sight: { label: '관광', icon: '🏯', desc: '메인 스팟을 이 날에 배치해요' },
+  rest: { label: '휴식', icon: '🌿', desc: '숙소에서 도보 20분 안의 곳만, 없으면 비워 둬요' },
+  shop: { label: '쇼핑', icon: '🛍️', desc: '쇼핑몰 위주로 코스를 짜요' },
+  free: { label: '자유', icon: '✨', desc: '앱이 숙소 주변 인기 코스를 자동으로 짜요' },
+};
+export const dayStyle = (trip, di) => (DAY_STYLE[trip.dayStyles?.[di]] ? trip.dayStyles[di] : 'sight');
+export const REST_WALK_MIN = 20;
+export const isShop = (p) => (p?.types || []).some((t) => ['shopping_mall', 'department_store', 'market', 'shopping_center', 'clothing_store', 'store', 'outlet_mall'].includes(t)) || /쇼핑|백화점|몰$|아울렛|상점가|시장/.test(p?.typeLabel || p?.name || '');
+
 // 마지막 날(귀국일)에 넣을 수 있는 스팟: 짐을 맡긴 숙소에서 30분 안에 가고, 짧게 머무는 곳(산책·쇼핑)
 export const LAST_DAY_REACH_MIN = 30;
 export const LAST_DAY_MAX_STAY = 120;
@@ -530,7 +541,18 @@ export function autoDistribute(trip, spots) {
     const order = optimizeOrder(list, h, est);
     return list.reduce((s, p) => s + p.stay, 0) + tourCost(order, h, est);
   };
-  const allowed = (s, di) => di !== last || okOnLastDay(trip, s, est);
+  // 그날 스타일에 맞는 스팟인지: 휴식=숙소 도보 20분 안, 쇼핑=쇼핑 장소, 귀국일=가깝고 짧은 곳
+  const allowed = (s, di) => {
+    if (di === last && !okOnLastDay(trip, s, est)) return false;
+    const st = dayStyle(trip, di);
+    if (st === 'rest') {
+      const h = dayHotel(trip, di);
+      return !!h && estimateMinutes(h, s, 'WALK') <= REST_WALK_MIN;
+    }
+    if (st === 'shop') return isShop(s);
+    return true;
+  };
+  const unplaced = [];
 
   // 1) 숙소별 체류 구간: 같은 숙소에서 출발·복귀하는 날들을 묶는다
   const segs = [];
@@ -554,7 +576,9 @@ export function autoDistribute(trip, spots) {
   const used = caps.map(() => 0);
   const placeCluster = (c, days) => {
     const ok = days.filter((di) => c.every((sp) => allowed(sp, di)));
-    const pool = ok.length ? ok : days.filter((di) => di !== last);
+    // 관광·휴식·쇼핑 날을 먼저 쓰고, 자유 날은 남을 때만
+    const firm = ok.filter((di) => dayStyle(trip, di) !== 'free');
+    const pool = firm.length ? firm : ok;
     if (!pool.length) return false;
     let pick = null;
     for (const di of pool) {
@@ -600,7 +624,7 @@ export function autoDistribute(trip, spots) {
       if (!pick || score < pick.score) pick = { di, score };
     }
     if (pick) out[pick.di].push(sp);
-    else out[Math.max(0, last - 1)].push(sp);
+    else unplaced.push(sp); // 휴식·쇼핑 설정 때문에 넣을 날이 없는 스팟
   }
 
   // 4) 과부하 해소: 넘치는 날에서 여유 있는 날로, 그 날 중심에 가장 가까운 스팟을 옮긴다(가까운 숙소의 날을 우선)
@@ -627,6 +651,7 @@ export function autoDistribute(trip, spots) {
     out[move.to].push(move.p);
   }
 
+  out.unplaced = unplaced;
   // 관광지 배치가 끝난 뒤 음식점을 식사 자리에, 자리가 없으면 가까운 날에 일반 장소로
   for (const f of assignMeals(trip, foods, out)) {
     let bi = 0;
@@ -637,9 +662,11 @@ export function autoDistribute(trip, spots) {
     });
     out[bi].push(f);
   }
-  return out.map((list, di) => {
+  const result = out.map((list, di) => {
     // '숙소 도착·이동' 고정 자리가 있으면 포함해서 배치(짐 맡긴 이후 시간 기준)
     const fixed = (trip.days[di]?.stops || []).filter((s) => s.fixed);
     return arrangeStops(trip, di, [...fixed, ...list]);
   });
+  result.unplaced = out.unplaced || [];
+  return result;
 }

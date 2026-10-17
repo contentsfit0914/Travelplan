@@ -25,6 +25,11 @@ import {
   airportPoint,
   dayOrigin,
   dayHotel,
+  dayStyle,
+  DAY_STYLE,
+  REST_WALK_MIN,
+  isShop,
+  arrangeStops,
   nightHotel,
   isMoveDay,
   minInsertIndex,
@@ -694,6 +699,21 @@ function setupStep4() {
     ${seg3('mealTolerance', [[10, '10분'], [30, '30분'], [60, '1시간'], [120, '2시간']], t.mealTolerance)}
     <p class="hint">목표 시각에 가장 가까운 빈 시간에 식사 자리를 잡아요. 오차범위 안에서 남는 시간만큼 더 먼 맛집까지 추천해요. 예) 점심 12:00·오차 1시간인데 12:30에 자리가 나면 30분 안에 갈 수 있는 곳까지 찾아요.</p>
   </div>
+  <div class="section-title">날짜별 여행 스타일 <span class="muted">· 카드를 누를 때마다 바뀌어요</span></div>
+  <div class="style-grid">${t.days
+    .map((_, i) => {
+      const st = dayStyle(t, i);
+      const d = DAY_STYLE[st];
+      return `<button class="style-card st-${st}" style="--c:${color(i)}" data-action="day-style" data-day="${i}" aria-label="D${i + 1} ${dayLabel(t, i)} 스타일: ${d.label}, 누르면 바꾸기">
+        <span class="sc-day"><b>D${i + 1}</b><small>${dayLabel(t, i)}</small></span>
+        <span class="sc-ico">${d.icon}</span>
+        <span class="sc-style">${d.label}</span>
+      </button>`;
+    })
+    .join('')}</div>
+  <ul class="style-legend">${Object.entries(DAY_STYLE)
+    .map(([k, d]) => `<li><b>${d.icon} ${d.label}</b> ${d.desc}</li>`)
+    .join('')}</ul>
   <div class="section-title">날짜별 관광 가용 시간 <span class="muted">(공항 이동·식사 제외)</span></div>
   <div class="cap-list">${bars}</div>`;
 }
@@ -765,7 +785,7 @@ function overviewHTML() {
         const r = computeDay(t, i, s);
         const warn = r.overflow ? `<span class="warn-pill">⚠ ${fmtDur(r.overflow)} 초과</span>` : r.gaps.length ? `<span class="gap-pill">${icon('food', 14)} ${r.gaps.map((g) => g.label).join('·')} 미정</span>` : `<span class="ok-pill">여유 ${fmtDur(r.free)}</span>`;
         return `<button class="day-card" style="--c:${color(i)}" data-action="day" data-day="${i}">
-          <div class="dc-head"><b>D${i + 1}</b> <span>${dayLabel(t, i)}</span> <span class="muted">${i === 0 ? `✈ ${t.arrival.time} 도착` : r.dep ? `✈ ${t.departure.time} 출발` : `${fmtTime(r.win.start)}–${fmtTime(Math.max(r.end, r.win.start))}`}</span>${isMoveDay(t, i) ? ' <span class="gap-pill">🧳 숙소 이동</span>' : ''} ${warn}</div>
+          <div class="dc-head"><b>D${i + 1}</b> <span>${dayLabel(t, i)}</span>${dayStyle(t, i) !== 'sight' ? `<em class="badge style">${DAY_STYLE[dayStyle(t, i)].icon} ${DAY_STYLE[dayStyle(t, i)].label}</em>` : ''} <span class="muted">${i === 0 ? `✈ ${t.arrival.time} 도착` : r.dep ? `✈ ${t.departure.time} 출발` : `${fmtTime(r.win.start)}–${fmtTime(Math.max(r.end, r.win.start))}`}</span>${isMoveDay(t, i) ? ' <span class="gap-pill">🧳 숙소 이동</span>' : ''} ${warn}</div>
           <div class="dc-stops">${r.rows.some((x) => x.num) ? r.rows.filter((x) => x.num).map((x) => `<span><i>${x.num}</i>${esc(x.stop.name)}</span>`).join('') : '<span class="muted">비어 있음 — 눌러서 채우기</span>'}</div>
           <div class="dc-foot muted">이동 ${fmtDur(r.totals.travel)} · 관광 ${fmtDur(r.totals.sight)} · 식사·카페 ${fmtDur(r.totals.meal)}</div>
         </button>`;
@@ -982,7 +1002,7 @@ function dayHTML(di) {
   return `<section class="content">
     <div class="summary" style="--c:${color(di)}">
       <div class="sum-head">
-        <div><b>D${di + 1} · ${dayLabel(t, di)}</b>${r.win.isArrival ? '<em class="badge">도착일</em>' : ''}${r.win.isDeparture ? '<em class="badge">귀국일</em>' : ''}</div>
+        <div><b>D${di + 1} · ${dayLabel(t, di)}</b>${dayStyle(t, di) !== 'sight' ? `<em class="badge style">${DAY_STYLE[dayStyle(t, di)].icon} ${DAY_STYLE[dayStyle(t, di)].label}</em>` : ''}${r.win.isArrival ? '<em class="badge">도착일</em>' : ''}${r.win.isDeparture ? '<em class="badge">귀국일</em>' : ''}</div>
         <div class="muted">${r.win.isArrival ? '✈ ' : ''}${fmtTime(r.win.start)} – ${fmtTime(r.win.rawEnd)}${r.dep ? ' ✈' : ''}</div>
       </div>
       <div class="timebar" aria-hidden="true">
@@ -1015,7 +1035,7 @@ function dayHTML(di) {
     ${!edit && real.length >= 2 ? '<p class="lp-hint">💡 일정 카드를 꾹 누르면 바로 순서를 바꿀 수 있어요</p>' : ''}
     ${
       !real.length
-        ? `<div class="empty big"><p>아직 이 날 일정이 비어 있어요.</p><button class="btn btn-primary" data-action="open-rec" data-tab="sight">숙소 주변 가볼만한 곳 추천받기</button></div>`
+        ? `<div class="empty big"><p>${dayStyle(t, di) === 'rest' ? `휴식일이에요. 숙소에서 도보 ${REST_WALK_MIN}분 안에 갈 만한 곳이 없어 비워 두었어요.` : '아직 이 날 일정이 비어 있어요.'}</p><button class="btn btn-primary" data-action="open-rec" data-tab="sight">숙소 주변 가볼만한 곳 추천받기</button></div>`
         : ''
     }
   </section>`;
@@ -2150,7 +2170,7 @@ async function quickSpot(q) {
   render({ fit: true });
 }
 
-function build(opts = {}) {
+async function build(opts = {}) {
   const t = S.trip;
   // 새로 짤 때는 직접 추가한 장소·식사·건너뛰기를 모두 지우고 메인 스팟만으로 시작
   t.days = t.days.map((d) => ({ ...emptyDay(), stops: d.stops.filter((s) => s.fixed) }));
@@ -2160,7 +2180,8 @@ function build(opts = {}) {
     const stay = kind !== m.kind ? defaultStay({ ...m, kind }) : m.stay;
     return { ...m, kind, stay, meal: null, uid: uid() };
   });
-  t.days = autoDistribute(t, spots).map((stops) => ({ ...emptyDay(), stops }));
+  const dist = autoDistribute(t, spots);
+  t.days = dist.map((stops) => ({ ...emptyDay(), stops }));
   t.created = true;
   save();
   S.ui.screen = 'plan';
@@ -2168,12 +2189,69 @@ function build(opts = {}) {
   S.ui.sheet = null;
   S.ui.search = { q: '', results: [], loading: false, error: '' };
   render({ fit: true, resetScroll: true });
+  const filled = await fillStyledDays(t);
   const meals = t.days.flatMap((d) => d.stops).filter((x) => x.must && x.meal).length;
+  const skipped = dist.unplaced?.length ? ` · ${dist.unplaced.length}곳은 휴식·쇼핑 설정에 맞지 않아 뺐어요` : '';
+  const auto = filled ? ` · 자유·쇼핑 날에 ${filled}곳을 자동으로 넣었어요` : '';
   toast(
     t.mustSpots.length
-      ? `${opts.rebuilt ? '바뀐 설정으로 일정을 새로 짰어요 · ' : ''}메인 스팟 ${t.mustSpots.length}곳을 ${t.days.filter((d) => d.stops.some((x) => !x.fixed)).length}일에 나눴어요${meals ? ` (식당 ${meals}곳은 식사 시간에)` : ''}`
-      : '빈 일정을 만들었어요. 추천으로 채워 보세요',
+      ? `${opts.rebuilt ? '바뀐 설정으로 일정을 새로 짰어요 · ' : ''}메인 스팟 ${t.mustSpots.length - (dist.unplaced?.length || 0)}곳을 ${t.days.filter((d) => d.stops.some((x) => !x.fixed)).length}일에 나눴어요${meals ? ` (식당 ${meals}곳은 식사 시간에)` : ''}${skipped}${auto}`
+      : filled
+        ? `자유·쇼핑 날에 ${filled}곳을 자동으로 넣었어요`
+        : '빈 일정을 만들었어요. 추천으로 채워 보세요',
   );
+}
+
+// 자유·쇼핑 날: 그날 숙소 주변 인기 관광지·쇼핑몰을 가용 시간만큼 자동으로 채운다
+async function fillStyledDays(t) {
+  let added = 0;
+  const e = est();
+  for (let di = 0; di < t.days.length; di++) {
+    const st = dayStyle(t, di);
+    if (st !== 'free' && st !== 'shop') continue;
+    const hotel = dayHotel(t, di);
+    if (!hotel) continue;
+    const day = t.days[di];
+    const real = () => day.stops.filter((x) => !x.fixed);
+    if (real().length >= 3) continue;
+    let list;
+    try {
+      list = await S.provider.nearby(st === 'shop' ? 'shop' : 'sight', { lat: hotel.lat, lng: hotel.lng }, st === 'shop' ? 4000 : 3000);
+    } catch {
+      continue;
+    }
+    const score = (p) => (p.rating != null ? p.rating * Math.log10((p.ratingCount || 0) + 10) : 2.5);
+    const cands = list
+      .filter((p) => p.kind !== 'hotel' && p.kind !== 'food' && placeDay(p.id) == null && (st !== 'shop' || isShop(p) || p.kind === 'sight'))
+      .sort((a, b) => score(b) - score(a) || distKm(hotel, a) - distKm(hotel, b));
+    const cap = dayCapacity(t, di);
+    const loadOf = (stops) => stops.reduce((s, p) => s + p.stay, 0) + tourMin(stops, hotel, e);
+    for (const p of cands) {
+      if (real().length >= 3) break;
+      const stop = makeStop(p, { stay: st === 'shop' ? 90 : undefined });
+      if (!stop.stay) stop.stay = makeStop(p).stay;
+      if (loadOf([...real(), stop]) > cap) continue;
+      day.stops.push(stop);
+      added++;
+    }
+    day.stops = arrangeStops(t, di, day.stops);
+  }
+  if (added) {
+    save();
+    render({ fit: true });
+  }
+  return added;
+}
+
+// 숙소에서 출발해 들르고 돌아오는 이동시간 합(추정)
+function tourMin(stops, hotel, e) {
+  let prev = hotel;
+  let m = 0;
+  for (const s of stops) {
+    m += e(prev, s);
+    prev = s;
+  }
+  return stops.length ? m + e(prev, hotel) : 0;
 }
 
 // 일정 생성 후 설정을 고쳤을 때: 바뀐 설정으로 일정을 처음부터 다시 짠다(직접 추가한 장소는 초기화)
@@ -2285,6 +2363,13 @@ const actions = {
     render({ fit: true });
     toast(first ? `숙소 등록: ${p.name}` : `${p.name} 등록 · 마지막 밤에 넣었어요. 날짜를 눌러 바꿀 수 있어요`);
     fetchHotelInfo(p.id);
+  },
+  'day-style': (d) => {
+    const order = Object.keys(DAY_STYLE);
+    const i = Number(d.day);
+    S.trip.dayStyles[i] = order[(order.indexOf(dayStyle(S.trip, i)) + 1) % order.length];
+    save();
+    render();
   },
   'hotel-times-ok': (d) => {
     const h = S.trip.hotels.find((x) => x.id === d.id);

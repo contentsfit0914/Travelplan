@@ -408,3 +408,30 @@ test('귀국일: 저녁 비행기면 숙소에서 30분 안의 짧은 스팟만 
   const out = autoDistribute(t, many);
   for (const s of out[4]) assert.ok(okOnLastDay(t, s), `귀국일에 들어간 ${s.name}은 가깝고 짧아야 한다`);
 });
+
+// ---- 날짜별 여행 스타일 ------------------------------------------------------
+test('여행 스타일: 휴식 날엔 숙소 도보 20분 안의 스팟만, 쇼핑 날엔 쇼핑몰만, 메인 스팟은 관광 날로', () => {
+  const t = syncTrip(trip({ hotels: [H('h-shinjuku')], nightHotel: [], mustSpots: [] }));
+  // D2 휴식, D3 쇼핑, 나머지 관광 (숙소: 신주쿠)
+  t.dayStyles = ['sight', 'rest', 'shop', 'sight', 'sight'];
+  const near = { ...byId('gyoen'), stay: 60 }; // 신주쿠 교엔: 숙소에서 도보 20분 안
+  const far = { ...byId('sensoji'), stay: 60 };
+  const mall = { ...byId('sunshine'), stay: 90 }; // shopping_mall
+  const out = autoDistribute(t, [near, far, mall, { ...byId('meiji'), stay: 60 }, { ...byId('tower'), stay: 60 }]);
+  const dayOf = (uid) => out.findIndex((list) => list.some((s) => s.uid === uid));
+  assert.notEqual(dayOf('sensoji'), 1, '멀리 있는 센소지는 휴식일에 못 들어간다');
+  assert.notEqual(dayOf('sensoji'), 2, '쇼핑몰이 아닌 센소지는 쇼핑일에 못 들어간다');
+  assert.notEqual(dayOf('meiji'), 2);
+  assert.ok(out[1].every((s) => s.uid === 'gyoen'), `휴식일엔 가까운 곳만: ${out[1].map((s) => s.uid)}`);
+  assert.ok(out[2].every((s) => s.uid === 'sunshine'), `쇼핑일엔 쇼핑몰만: ${out[2].map((s) => s.uid)}`);
+  assert.equal(out.flat().filter((s) => !s.fixed).length, 5);
+});
+
+test('여행 스타일: 넣을 날이 없는 스팟은 unplaced 로 돌려준다', () => {
+  const t = syncTrip(trip({ hotels: [H('h-shinjuku')], nightHotel: [], mustSpots: [] }));
+  t.dayStyles = ['rest', 'rest', 'rest', 'rest', 'rest'];
+  const out = autoDistribute(t, [{ ...byId('sensoji'), stay: 60 }, { ...byId('gyoen'), stay: 60 }]);
+  assert.equal(out.unplaced.length, 1);
+  assert.equal(out.unplaced[0].uid, 'sensoji');
+  assert.equal(out.flat().filter((s) => !s.fixed).length, 1);
+});
