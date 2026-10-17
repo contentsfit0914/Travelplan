@@ -1419,12 +1419,12 @@ function tourPlan(di) {
   };
   let prev = r.origin;
   for (const row of r.rows) {
-    append(row.leg, prev, row.stop, { uid: row.stop.uid, kind: row.stop.kind, name: row.stop.fixed ? '숙소 · 짐 맡기기' : row.stop.name, time: row.arrive, icon: row.stop.fixed ? icon('hotel', 16) : placeIcon(row.stop, 16) });
+    append(row.leg, prev, row.stop, { uid: row.stop.uid, kind: row.stop.kind, name: row.stop.fixed ? '숙소 · 짐 맡기기' : row.stop.name, time: row.arrive });
     prev = row.stop;
   }
   const home = dayHotel(t, di);
-  if (r.back && home) append(r.back, prev, home, { name: `${home.name} 복귀`, time: r.end, icon: icon('hotel', 16) });
-  if (r.dep) append(r.dep.leg, home, r.dep.airport, { name: `${r.dep.airport.name} 도착`, time: r.dep.atAirport, icon: icon('airport', 16) });
+  if (r.back && home) append(r.back, prev, home, { name: `${home.name} 복귀`, time: r.end });
+  if (r.dep) append(r.dep.leg, home, r.dep.airport, { name: `${r.dep.airport.name} 도착`, time: r.dep.atAirport });
   if (!marks.length) return null;
   const total = cum[cum.length - 1];
   // 전체 이동 10~18초 + 장소마다 1초 멈춤
@@ -1453,7 +1453,7 @@ function startTour(di) {
   const plan = tourPlan(di);
   if (!plan) return toast('아직 따라갈 동선이 없어요. 장소를 먼저 추가해 보세요');
   stopTour(false);
-  S.tour = { ...plan, i: 0, t0: performance.now(), pos: plan.pts[0], text: '출발!' };
+  S.tour = { ...plan, i: 0, t0: performance.now(), pos: plan.pts[0] };
   mapView.panTo(plan.pts[0]);
   renderTourBar();
   placeAvatar();
@@ -1490,7 +1490,6 @@ function startTour(di) {
 
 function arriveAt(mark) {
   const tr = S.tour;
-  tr.text = `${fmtTime(mark.time)} ${mark.icon} ${mark.name}`;
   // 장소에 멈춘 동안: 맛집·카페면 먹기, 아니면 앞을 보고 서기
   const eat = (mark.kind === 'food' || mark.kind === 'cafe') && hasSprites();
   tr.anim = eat ? 'eat' : 'down';
@@ -1547,7 +1546,7 @@ function renderTourBar() {
   const show = S.ui.screen === 'plan' && di >= 0 && t.days[di]?.stops.some((s) => !s.fixed);
   if (!show) return (bar.innerHTML = '');
   bar.innerHTML = S.tour
-    ? `<button class="tour-btn on" data-action="tour-stop" aria-label="동선 재생 멈추기"><span class="tour-av">${charHTML('right', { size: 26, play: true })}</span><span class="tour-txt">${esc(S.tour.text)}</span><b>■</b></button>`
+    ? `<button class="tour-btn on" data-action="tour-stop" aria-label="동선 재생 멈추기"><span class="tour-av">${charHTML('right', { size: 26, play: true })}</span><b>■</b></button>`
     : `<button class="tour-btn" data-action="tour-play" aria-label="캐릭터가 오늘 동선을 따라갑니다"><span class="tour-av">${charHTML('down', { size: 26 })}</span>▶ 동선 따라가기</button>`;
 }
 
