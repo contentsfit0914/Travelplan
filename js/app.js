@@ -31,7 +31,7 @@ import {
   budgetRadius,
   budgetLabel,
 } from './planner.js';
-import { MODES, distKm, fmtKm, centroid } from './geo.js';
+import { MODES, distKm, fmtKm, centroid, estimateMinutes } from './geo.js';
 import {
   loadTrip,
   saveTrip,
@@ -1072,9 +1072,13 @@ function recHTML(sh) {
   else if (!sh.results.length)
     list = `<div class="empty">${sh.tab === 'search' ? (sh.q ? '검색 결과가 없어요.' : '장소 이름을 검색해 이 날 일정에 넣을 수 있어요.') : '주변에서 찾은 곳이 없어요. 기준 위치를 바꿔 보세요.'}</div>`;
   else {
-    const sorted = [...sh.results].sort((a, b) =>
-      sh.sort === 'near' ? (sh.budget ? a.reach - b.reach : a.extra - b.extra) : sh.sort === 'rating' ? (b.rating || 0) - (a.rating || 0) : b.score - a.score,
-    );
+    const by = {
+      near: (a, b) => (sh.budget ? a.reach - b.reach : a.walk - b.walk) || a.extra - b.extra,
+      rating: (a, b) => (b.rating || 0) - (a.rating || 0) || (b.ratingCount || 0) - (a.ratingCount || 0),
+      reviews: (a, b) => (b.ratingCount || 0) - (a.ratingCount || 0) || (b.rating || 0) - (a.rating || 0),
+      score: (a, b) => b.score - a.score,
+    };
+    const sorted = [...sh.results].sort(by[sh.sort] || by.score);
     list = `<ul class="rec-list">${sorted.map((p) => recItemHTML(p, sh)).join('')}</ul>`;
   }
   return `
@@ -1092,7 +1096,7 @@ function recHTML(sh) {
     ${kw.length ? `<div class="chips scroll">${['전체', ...kw].map((k) => `<button class="chip sm ${(sh.keyword || '전체') === k ? 'on' : ''}" data-action="rec-keyword" data-v="${esc(k)}" ${isDemo() && k !== '전체' ? 'disabled title="Google 모드에서 사용할 수 있어요"' : ''}>${esc(k)}</button>`).join('')}</div>` : ''}
     <div class="sortbar">
       <span class="muted small">${sh.results.length ? `${sh.results.length}곳` : ''}${isDemo() ? ' · 데모 샘플' : ''}</span>
-      ${seg3('rec-sort', [['score', '추천순'], ['near', '가까운순'], ['rating', '평점순']], sh.sort).replaceAll('data-action="set"', 'data-action="rec-sort"')}
+      ${seg3('rec-sort', [['score', '추천순'], ['near', '거리순'], ['rating', '평점순'], ['reviews', '리뷰순']], sh.sort).replaceAll('data-action="set"', 'data-action="rec-sort"')}
     </div>
     ${list}
   </div>`;
@@ -1692,10 +1696,14 @@ function recCenters(sh) {
   if (sh.anchor === 'hotel' && t.hotel) return [dayHotel(t, S.ui.day)];
   if (sh.anchor === 'origin') return [dayOrigin(t, S.ui.day)].filter(Boolean);
   if (sh.anchor !== 'route') {
-    const s = day.stops.find((x) => x.uid === sh.anchor);
-    if (s) return [s];
+    const i = day.stops.findIndex((x) => x.uid === sh.anchor);
+    if (i >= 0) {
+      // 기준 장소 + 다음 장소 근처에서 찾는다(다음 장소가 없으면 숙소 근처)
+      const next = day.stops.slice(i + 1).find((x) => !x.fixed) || dayHotel(t, S.ui.day);
+      return [day.stops[i], ...(next && next !== day.stops[i] ? [next] : [])];
+    }
   }
-  const pts = [dayHotel(t, S.ui.day), ...day.stops.filter((x) => !x.fixed)].filter(Boolean);
+  const pts = [...day.stops.filter((x) => !x.fixed), dayHotel(t, S.ui.day)].filter(Boolean);
   if (pts.length <= 4) return pts;
   // 동선을 고르게 대표하는 4개 지점
   return [0, 1, 2, 3].map((k) => pts[Math.round((k * (pts.length - 1)) / 3)]);
@@ -1713,8 +1721,9 @@ async function loadRec() {
     render();
     return;
   }
-  const single = sh.anchor !== 'route';
-  const radius = sh.budget ? budgetRadius(sh.budget) : sh.tab === 'sight' ? (single ? 1200 : 1500) : single ? 600 : 800;
+  // 기본 범위: 기준 장소에서 도보 15분. 식사 자리의 오차범위가 더 넓으면 그만큼
+  const walk15 = budgetRadius(15);
+  const radius = Math.max(walk15, sh.budget ? budgetRadius(sh.budget) : 0);
   const keyword = sh.keyword && sh.keyword !== '전체' ? sh.keyword : '';
   const token = (sh.token = uid());
   sh.loading = true;
@@ -1722,26 +1731,39 @@ async function loadRec() {
   render();
   try {
     const provider = S.provider;
-    const lists = await Promise.all(
-      centers.map((c) => {
-        const k = `${provider.name}|${sh.tab}|${c.lat.toFixed(3)},${c.lng.toFixed(3)}|${radius}|${keyword}`;
-        if (!recCache.has(k)) recCache.set(k, provider.nearby(sh.tab, { lat: c.lat, lng: c.lng }, radius, keyword).catch((e) => {
-          recCache.delete(k);
-          throw e;
-        }));
-        return recCache.get(k);
-      }),
-    );
-    if (sh.token !== token || S.ui.sheet !== sh) return;
-    const seen = new Map();
-    lists.flat().forEach((p) => {
-      if (seen.has(p.id) || p.kind === 'hotel' || placeDay(p.id) != null) return;
-      if (sh.tab === 'sight' && p.kind !== 'sight') return;
-      if (sh.tab === 'food' && p.kind !== 'food') return;
-      seen.set(p.id, p);
-    });
-    let results = scoreCandidates([...seen.values()], day, centers);
+    const fetchAll = async (rad) => {
+      const lists = await Promise.all(
+        centers.map((c) => {
+          const k = `${provider.name}|${sh.tab}|${c.lat.toFixed(3)},${c.lng.toFixed(3)}|${rad}|${keyword}`;
+          if (!recCache.has(k)) recCache.set(k, provider.nearby(sh.tab, { lat: c.lat, lng: c.lng }, rad, keyword).catch((e) => {
+            recCache.delete(k);
+            throw e;
+          }));
+          return recCache.get(k);
+        }),
+      );
+      const seen = new Map();
+      lists.flat().forEach((p) => {
+        if (seen.has(p.id) || p.kind === 'hotel' || placeDay(p.id) != null) return;
+        if (sh.tab === 'sight' && p.kind !== 'sight') return;
+        if (sh.tab === 'food' && p.kind !== 'food') return;
+        seen.set(p.id, p);
+      });
+      return [...seen.values()];
+    };
+    let found = await fetchAll(radius);
     sh.note = '';
+    if (found.length < 3) {
+      // 도보 15분 안에 거의 없으면 범위를 넓혀 한 번 더
+      const more = await fetchAll(Math.round(radius * 2.5));
+      if (sh.token !== token || S.ui.sheet !== sh) return;
+      if (more.length > found.length) {
+        found = more;
+        sh.note = '도보 15분 안에 있는 곳이 적어 범위를 넓혀서 보여 드려요.';
+      }
+    }
+    if (sh.token !== token || S.ui.sheet !== sh) return;
+    let results = scoreCandidates(found, day, centers);
     if (sh.budget && centers.length === 1) {
       // 식사 자리에서 오차범위 안에 갈 수 있는 곳만(추정 이동시간 기준)
       const reachSeg = estimateSeg(t);
@@ -1774,11 +1796,13 @@ function scoreCandidates(list, day, centers) {
     const ins = bestInsert(day.stops, dayHotel(t, S.ui.day), p, e);
     const d = distKm(centers.length === 1 ? centers[0] : anchorPt, p);
     const nearest = Math.min(...centers.map((c) => distKm(c, p)));
+    const walk = Math.min(...centers.map((c) => estimateMinutes(c, p, 'WALK')));
     const quality = p.rating != null ? p.rating * Math.log10((p.ratingCount || 0) + 10) : 3;
     return {
       ...p,
       extra: ins.extra,
-      distLabel: centers.length === 1 ? `기준점에서 ${fmtKm(d)}` : `동선에서 ${fmtKm(nearest)}`,
+      walk,
+      distLabel: walk <= 30 ? `도보 ${walk}분 (${fmtKm(nearest)})` : centers.length === 1 ? `기준점에서 ${fmtKm(d)}` : `동선에서 ${fmtKm(nearest)}`,
       score: quality - ins.extra / 15,
     };
   });
