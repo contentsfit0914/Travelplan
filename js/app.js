@@ -66,7 +66,7 @@ const CFG = window.TRAVELPLAN_CONFIG || {};
 const DAY_COLORS = ["#FF4F3A", "#2F6BFF", "#15A36A", "#8A4DFF", "#F2A20C", "#E8457B", "#1FA2A0", "#5B6B7A", "#7C5CFF", "#C9770A"];
 // 아이콘 이미지(assets/icons): 카메라·택시·버스·침대·비행기·커피·맥주·오믈렛
 const ICON_IMG = { sight: 'camera', food: 'food', bar: 'beer', cafe: 'coffee', hotel: 'bed', airport: 'plane', DRIVE: 'taxi', TRANSIT: 'bus' };
-const icon = (name, size = 20, cls = '') => (ICON_IMG[name] ? `<img class="ic ${cls}" src="assets/icons/${ICON_IMG[name]}.png" width="${size}" height="${size}" alt="" aria-hidden="true">` : '');
+const icon = (name, size = 20, cls = '') => (ICON_IMG[name] ? `<img class="ic ${cls}" src="assets/icons/${ICON_IMG[name]}.png?v=2" width="${size}" height="${size}" alt="" aria-hidden="true">` : '');
 // 술집·이자카야는 맥주 아이콘
 const isBar = (p) => (p?.types || []).some((t) => ['bar', 'pub', 'wine_bar', 'izakaya_restaurant', 'night_club'].includes(t)) || /이자카야|술집|주점|바$|펍/.test(p?.typeLabel || '');
 const placeIcon = (p, size = 20, cls = '') => icon(p?.kind === 'food' && isBar(p) ? 'bar' : p?.kind || 'sight', size, cls);

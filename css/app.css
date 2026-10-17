@@ -53,7 +53,7 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; font-weight: 800; line
 .muted { color: var(--muted); }
 .small { font-size: 12.5px; }
 .center { text-align: center; }
-.ic { display: inline-block; vertical-align: -0.22em; object-fit: contain; flex: none; }
+.ic { display: inline-block; vertical-align: -0.22em; object-fit: contain; flex: none; background: transparent; border: 0; }
 .r-name .ic, .tabs .ic, .btn .ic, .seg .ic, .fc-head .ic { vertical-align: -0.25em; margin-right: 1px; }
 .pin .ic, .stop-num .ic, .a-ico .ic, .gap-ico .ic, .sb-thumb .ic, .thumb.ph .ic, .pin-inline .ic { vertical-align: middle; }
 .pin-hotel.multi span .ic { margin-right: 1px; }
