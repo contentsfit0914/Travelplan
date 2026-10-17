@@ -317,7 +317,7 @@ function render(opts = {}) {
       : `<button class="icon-btn" data-action="open-settings" aria-label="설정" title="설정">${ICON.gear}</button>`;
   $('#modeBadge').innerHTML = isDemo()
     ? `<button data-action="open-settings" class="badge-demo">${CFG.preview ? '미리보기' : '데모 모드'}</button>`
-    : `<span class="badge-live">Google 지도</span>`;
+    : '';
   renderMap(opts);
 }
 
@@ -535,7 +535,7 @@ function popularHTML(addedCount) {
   const pop = S.ui.popular;
   if (!pop) {
     return `
-  <div class="chips-label">인기 스팟 빠르게 추가 <span class="muted">${addedCount ? `· ${addedCount}곳 추가됨 (다시 누르면 빠져요)` : '· 누르면 추가돼요'}</span></div>
+  <div class="chips-label">인기 스팟 빠르게 추가 <span class="muted">${addedCount ? `· ${addedCount}곳 추가됨` : ''}</span></div>
   <div class="chips">${QUICK_SPOTS.map((q) => {
     const on = quickAdded(q);
     const busy = S.ui.quickBusy === q;
@@ -585,7 +585,6 @@ function setupStep3() {
   const total = t.mustSpots.reduce((s, m) => s + m.stay, 0);
   const cap = t.days.reduce((s, _, i) => s + dayCapacity(t, i), 0);
   return `
-  <p class="lead">꼭 가고 싶은 곳을 넣으면 가까운 곳끼리 묶어 날짜별로 나눠 드려요.</p>
   <div class="searchbox">
     <input type="search" placeholder="장소·지역 검색 (예: 신주쿠, 센소지)" data-search="must" value="${esc(S.ui.search.q)}" enterkeyhint="search">
     <button class="btn btn-primary" data-action="search" data-target="must">검색</button>
