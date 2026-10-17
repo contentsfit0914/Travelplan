@@ -36,9 +36,12 @@ export class MapView {
         zoomControl: true,
         gestureHandling: 'greedy',
         clickableIcons: false,
+        disableDoubleClickZoom: true, // 더블 탭은 '전체 보기'로 쓴다
       });
+      this.map.addListener('dblclick', () => this.onDblClick?.());
     } else {
-      this.map = window.L.map(this.el, { zoomControl: true }).setView([TOKYO.lat, TOKYO.lng], 12);
+      this.map = window.L.map(this.el, { zoomControl: true, doubleClickZoom: false }).setView([TOKYO.lat, TOKYO.lng], 12);
+      this.map.on('dblclick', () => this.onDblClick?.());
       this.el.classList.toggle('no-tiles', !tiles);
       if (tiles) {
         window.L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
@@ -216,12 +219,14 @@ export class MapView {
     }
   }
 
-  panTo(p, zoom) {
+  // zoom: 최소 확대 수준. exact=true 면 그 수준으로 맞춘다(핀을 눌렀을 때 거리 수준으로)
+  panTo(p, zoom, exact = false) {
     if (!this.map) return;
+    const target = zoom ? (exact ? zoom : Math.max(zoom, this.map.getZoom())) : this.map.getZoom();
     if (this.kind === 'google') {
       this.map.panTo(p);
-      if (zoom && this.map.getZoom() < zoom) this.map.setZoom(zoom);
-    } else this.map.setView([p.lat, p.lng], Math.max(zoom || 0, this.map.getZoom()), { animate: true });
+      if (zoom && this.map.getZoom() !== target) this.map.setZoom(target);
+    } else this.map.setView([p.lat, p.lng], target, { animate: true });
   }
 
   resize() {

@@ -1601,7 +1601,7 @@ function renderMap(opts = {}) {
           active,
           title: `${fmtTime(row.arrive)} ${row.stop.name}`,
           z: active ? 50 : 30,
-          onClick: () => openStop(row.stop.uid, false),
+          onClick: () => openStop(row.stop.uid, 'zoom'),
         });
         fitPts.push(row.stop);
       });
@@ -1628,6 +1628,7 @@ function renderMap(opts = {}) {
 
   mapView.draw({ markers, lines });
   placeAvatar();
+  S.ui.fitPts = [...fitPts, ...(S.ui.sheet?.type === 'rec' ? S.ui.sheet.results : [])];
   const key = `${S.ui.screen}|${S.ui.step}|${S.ui.day}|${fitPts.length}|${S.ui.sheet?.type === 'rec' ? S.ui.sheet.results.length : 0}`;
   if (opts.fit || key !== lastFit) {
     lastFit = key;
@@ -1811,8 +1812,10 @@ function focusCand(id, fromMap) {
   S.ui.focus = `cand:${id}`;
   renderSheet();
   renderMap();
-  if (fromMap) document.getElementById(candDomId(id))?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  else mapView.panTo(p, 15);
+  if (fromMap) {
+    document.getElementById(candDomId(id))?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    mapView.panTo(p, 17, true);
+  } else mapView.panTo(p, 15);
 }
 
 function addCandidate(id) {
@@ -1863,7 +1866,8 @@ function openStop(u, pan = true) {
   S.ui.focus = u;
   if (S.ui.day !== -1 && S.ui.day !== f.di) S.ui.day = f.di;
   render();
-  if (pan) mapView.panTo(f.s, 15);
+  if (pan === 'zoom') mapView.panTo(f.s, 17, true); // 지도 핀을 눌렀을 때: 거리 수준으로 확대
+  else if (pan) mapView.panTo(f.s, 15);
 }
 
 // ---------------------------------------------------------------- 장소 상세 팝업
@@ -2775,6 +2779,11 @@ function mount() {
   document.addEventListener('change', onChange);
   document.addEventListener('keydown', onKey);
   routes.onChange = () => render();
+  // 빈 지도를 더블 탭하면 지금 보이는 일정 전체가 들어오게 축소
+  mapView.onDblClick = () => {
+    const pts = S.ui.fitPts || [];
+    if (pts.length) mapView.fit(pts);
+  };
   watchKeyboard();
   watchLongPress();
   window.addEventListener('gm-auth-failure', async () => {

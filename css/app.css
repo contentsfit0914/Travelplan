@@ -470,17 +470,18 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -0.03em; font-weight: 800; line
 /* ---------- 지도 핀(스티커) */
 .lf-icon { background: none; border: 0; }
 .lf-anchor { position: relative; width: 0; height: 0; }
-.lf-anchor > .pin { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); }
+.lf-anchor > .pin { position: absolute; left: 0; top: 0; transform: translate(-50%, calc(-100% - 7px)); }
 .pin {
   --c: #334155; display: grid; place-items: center; min-width: 30px; height: 30px; padding: 0 6px; border-radius: 15px;
   background: var(--c); color: #fff; font-weight: 800; font-size: 13px; border: 2px solid var(--ink);
-  box-shadow: 2px 2px 0 var(--ink); position: relative; margin-bottom: 8px; cursor: pointer; white-space: nowrap;
+  box-shadow: 2px 2px 0 var(--ink); position: relative; margin-bottom: 7px; cursor: pointer; white-space: nowrap;
 }
+/* 꼬리 삼각형: 테두리 바깥 선에 붙여 아래로(끝점이 실제 좌표) */
 .pin::after {
-  content: ''; position: absolute; left: 50%; bottom: -9px; margin-left: -5px; border: 5px solid transparent; border-top: 7px solid var(--ink);
+  content: ''; position: absolute; left: 50%; bottom: -14px; margin-left: -5px; border: 5px solid transparent; border-top: 7px solid var(--ink);
 }
 .pin.is-active { transform: scale(1.22); transform-origin: bottom center; z-index: 5; }
-.lf-anchor > .pin.is-active { transform: translate(-50%, -100%) scale(1.22); }
+.lf-anchor > .pin.is-active { transform: translate(-50%, calc(-100% - 7px)) scale(1.22); }
 .pin-hotel { background: #fff; color: var(--ink); font-size: 15px; width: 34px; height: 34px; border-radius: 10px; }
 .pin-hotel.multi { background: var(--c); color: #fff; width: auto; min-width: 34px; padding: 0 6px; }
 .pin-hotel.multi span { display: flex; align-items: center; gap: 2px; }
