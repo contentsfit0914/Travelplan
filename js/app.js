@@ -922,6 +922,15 @@ function stopHTML(row, di, edit = false, day = null) {
   </div>`;
 }
 
+// 하루 예상 걸음 수: 도보 구간 거리 + 대중교통·택시 구간의 역·정류장 오가는 도보(약 600m) + 관광지 안에서 걷는 거리(약 800m). 보폭 0.7m
+function daySteps(r) {
+  let m = 0;
+  const legs = [...r.rows.map((x) => x.leg), r.back, r.dep?.leg].filter(Boolean);
+  for (const leg of legs) m += leg.mode === 'WALK' ? (leg.km || 0) * 1000 : leg.mode === 'TRANSIT' ? 600 : 150;
+  for (const row of r.rows) if (!row.stop.fixed) m += row.stop.kind === 'sight' ? 800 : 200;
+  return Math.round(m / 0.7 / 100) * 100;
+}
+
 function dayHTML(di) {
   const t = S.trip;
   const day = t.days[di];
@@ -932,7 +941,6 @@ function dayHTML(di) {
   const sights = real.filter((s) => s.kind === 'sight').length;
   const foods = real.filter((s) => s.kind !== 'sight').length;
   const pending = r.rows.some((x) => x.leg?.pending) || r.back?.pending;
-  const routeUrl = dayRouteUrl(di);
   const edit = S.ui.edit && real.length > 0;
 
   // 타임라인 조립
@@ -988,7 +996,7 @@ function dayHTML(di) {
   }
 
   const flow = [
-    { icon: ICON.route, label: '이동 동선', done: real.length > 0, sub: real.length ? `${real.length}곳` : '비어 있음', action: routeUrl ? `data-action="open-rec" data-tab="sight" data-anchor="route"` : '' },
+    { icon: ICON.route, label: '이동 동선', done: real.length > 0, sub: real.length ? `${real.length}곳` : '비어 있음', action: real.length ? `data-action="open-rec" data-tab="sight" data-anchor="route"` : '' },
     { icon: ICON.heart, label: '가볼만한 곳', done: sights >= 2, sub: `관광 ${sights}곳`, action: 'data-action="open-rec" data-tab="sight"' },
     {
       icon: ICON.food,
@@ -1002,18 +1010,20 @@ function dayHTML(di) {
   return `<section class="content">
     <div class="summary" style="--c:${color(di)}">
       <div class="sum-head">
-        <div><b>D${di + 1} · ${dayLabel(t, di)}</b>${dayStyle(t, di) !== 'sight' ? `<em class="badge style">${DAY_STYLE[dayStyle(t, di)].icon} ${DAY_STYLE[dayStyle(t, di)].label}</em>` : ''}${r.win.isArrival ? '<em class="badge">도착일</em>' : ''}${r.win.isDeparture ? '<em class="badge">귀국일</em>' : ''}</div>
-        <div class="muted">${r.win.isArrival ? '✈ ' : ''}${fmtTime(r.win.start)} – ${fmtTime(r.win.rawEnd)}${r.dep ? ' ✈' : ''}</div>
+        <div><b>${dayLabel(t, di)}</b></div>
+        <div class="steps" title="예상 걸음 수">👣 ${daySteps(r).toLocaleString()}보</div>
       </div>
       <div class="timebar" aria-hidden="true">
         <i class="tb-travel" style="width:${pct(r.totals.travel)}"></i><i class="tb-sight" style="width:${pct(r.totals.sight)}"></i><i class="tb-meal" style="width:${pct(r.totals.meal)}"></i>${r.overflow ? `<i class="tb-over" style="width:${pct(r.overflow)}"></i>` : ''}
         <span class="tb-limit" style="left:${pct(r.win.end - r.win.start)}"></span>
       </div>
+      <div class="tb-times"><span>${r.win.isArrival ? `${icon('airport', 14)} ${t.arrival.time}` : fmtTime(r.win.start)}</span><span>${r.dep ? `${t.departure.time} ${icon('airport', 14)}` : fmtTime(r.win.rawEnd)}</span></div>
       <div class="sum-stats">
         <span><i class="lg lg-travel"></i>이동 ${fmtDur(r.totals.travel)}</span>
         <span><i class="lg lg-sight"></i>관광 ${fmtDur(r.totals.sight)}</span>
         <span><i class="lg lg-meal"></i>식사·카페 ${fmtDur(r.totals.meal)}</span>
         ${r.overflow ? `<span class="over">⚠ ${fmtDur(r.overflow)} 초과${r.dep ? ' · 비행기 시간 확인' : ''}</span>` : `<span class="ok">여유 ${fmtDur(r.free)}</span>`}
+        ${pending ? '<span class="muted"><span class="spinner sm"></span> 실제 경로 계산 중</span>' : ''}
       </div>
       ${
         edit
@@ -1022,12 +1032,6 @@ function dayHTML(di) {
               .map((f) => `<li class="${f.done ? 'done' : ''}"><button ${f.action || 'disabled'}><span class="fi">${f.icon}</span><b>${f.label}</b><small>${f.sub}</small></button></li>`)
               .join('')}</ol>`
       }
-      <div class="sum-actions">
-        <button class="btn btn-sm ${edit ? 'btn-primary' : ''}" data-action="edit-order" ${real.length ? '' : 'disabled'}>${edit ? '✓ 편집 완료' : '↕ 순서·시간 편집'}</button>
-        <button class="btn btn-sm" data-action="optimize" ${real.length < 2 ? 'disabled' : ''}>⇅ 자동 최적화</button>
-        ${routeUrl && !edit ? `<a class="btn btn-sm" href="${routeUrl}" target="_blank" rel="noopener" aria-label="Google 지도로 하루 경로 보기">🗺 지도</a>` : ''}
-        ${pending ? '<span class="muted small"><span class="spinner sm"></span> 실제 경로 계산 중</span>' : ''}
-      </div>
     </div>
     ${edit ? `<div class="edit-hint">▲▼로 순서를 바꾸면 도착 시간과 이동 경로가 바로 다시 계산돼요.</div>` : ''}
     ${!t.hotel ? `<div class="banner banner-err">숙소가 없어 출발·복귀 동선을 계산할 수 없어요. <button class="link" data-action="edit-setup" data-step="2">숙소 설정</button></div>` : ''}
