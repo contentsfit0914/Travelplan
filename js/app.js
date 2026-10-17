@@ -886,9 +886,9 @@ function stopHTML(row, di, edit = false, day = null) {
       </button>
       ${
         quick
-          ? `<div class="quick-bar" role="group" aria-label="${esc(s.name)} 순서 바꾸기">
+          ? `<div class="quick-bar" role="group" aria-label="${esc(s.name)} 순서 바꾸기·삭제">
         <button data-action="quick-move" data-d="-1" ${mv.up ? '' : 'disabled'} aria-label="한 칸 위로">‹ <small>위로</small></button>
-        <button class="qb-cancel" data-action="quick-cancel">취소</button>
+        <button class="qb-del" data-action="quick-delete" aria-label="${esc(s.name)} 일정에서 삭제">삭제</button>
         <button data-action="quick-move" data-d="1" ${mv.down ? '' : 'disabled'} aria-label="한 칸 아래로"><small>아래로</small> ›</button>
       </div>`
           : ''
@@ -2492,9 +2492,11 @@ const actions = {
       },
     });
   },
-  'quick-cancel': () => {
+  // 길게 누른 카드 가운데 '삭제': 그 자리는 빈 시간으로 돌아간다(되돌리기 가능)
+  'quick-delete': () => {
+    const uid = S.ui.quick;
     S.ui.quick = null;
-    render();
+    actions['remove-stop']({ uid });
   },
   'edit-order': () => {
     S.ui.quick = null;
