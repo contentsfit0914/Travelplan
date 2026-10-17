@@ -873,8 +873,8 @@ function stopHTML(row, di, edit = false, day = null) {
   if (!edit) {
     const quick = S.ui.quick === s.uid;
     const mv = quick ? moveability(day, row.index) : null;
-    // 카드 높이는 머무는 시간에 비례(1시간 = 기본 높이, 30분 단위)
-    const hu = Math.max(1, Math.round(s.stay / 30) / 2);
+    // 카드 높이는 머무는 시간에 비례(1시간 = 기본 높이, 30분 단위 내림: 1시간 15분은 1배, 1시간 30분은 1.5배)
+    const hu = Math.max(1, Math.floor(s.stay / 30) / 2);
     return `<div class="${classes} ${quick ? 'quick' : ''} ${hu > 1 ? 'is-tall' : ''}" style="--c:${color(di)};--hu:${hu}" data-uid="${esc(s.uid)}">${head}
     <div class="stop-card">
       <button class="stop-body" data-action="open-stop" data-uid="${esc(s.uid)}">
